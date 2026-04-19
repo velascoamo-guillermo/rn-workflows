@@ -1,0 +1,51 @@
+{
+  "name": "rn-workflows",
+  "version": "0.1.0",
+  "description": "Open-source CLI to generate Fastlane + GitHub Actions + GitLab CI from a single YAML config for React Native / Expo projects.",
+  "type": "module",
+  "bin": {
+    "rn-workflows": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "src/templates",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target node --packages external",
+    "test": "bun test",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "react-native",
+    "expo",
+    "fastlane",
+    "ci",
+    "cd",
+    "github-actions",
+    "gitlab-ci",
+    "workflows",
+    "codegen"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.2.0",
+    "citty": "^0.2.2",
+    "ejs": "^5.0.2",
+    "js-yaml": "^4.1.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/ejs": "^3.1.5",
+    "@types/js-yaml": "^4.0.9"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

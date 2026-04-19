@@ -1,0 +1,15 @@
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+
+ci: gitlab
+
+build:
+  staging:
+    platform: all
+    distribution: testflight+firebase
+    android:
+      buildType: apk
+    ios:
+      exportMethod: ad-hoc

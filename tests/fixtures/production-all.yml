@@ -1,0 +1,27 @@
+project:
+  type: bare
+  bundleId: com.myapp
+  packageName: com.myapp
+
+ci: github-actions
+
+build:
+  preview:
+    platform: android
+    distribution: firebase
+    android:
+      buildType: apk
+  staging:
+    platform: all
+    distribution: testflight+firebase
+    android:
+      buildType: apk
+    ios:
+      exportMethod: ad-hoc
+  production:
+    platform: all
+    distribution: store
+    android:
+      buildType: aab
+    ios:
+      exportMethod: app-store

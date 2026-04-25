@@ -11,7 +11,7 @@ export async function runSteps(steps: Step[], ctx: SetupContext): Promise<void> 
     try {
       result = await step.run(ctx);
     } catch (err) {
-      p.log.error(`${step.label}: ${(err as Error).message}`);
+      p.log.error(`[${step.id}] ${step.label}: ${err instanceof Error ? err.message : String(err)}`);
       throw err;
     }
     if (result.skipped) {

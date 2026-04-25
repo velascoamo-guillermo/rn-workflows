@@ -56,7 +56,7 @@ platform :ios do
     sh("cd .. && cd ios && pod install")
 <% } -%>
     setup_ci if ENV["CI"]
-    match(type: "<%= profile.matchType %>", readonly: true) if ENV["MATCH_PASSWORD"]
+    match(type: "<%= profile.matchType %>", readonly: ENV.fetch("MATCH_READONLY", "true") == "true") if ENV["MATCH_PASSWORD"]
     build_app(
       workspace: "ios/<%= profile.xcWorkspace %>.xcworkspace",
       scheme: "<%= profile.xcScheme %>",

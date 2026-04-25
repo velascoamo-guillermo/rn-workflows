@@ -112,13 +112,12 @@ Each build profile produces a GitHub Actions workflow with this job structure:
 ```mermaid
 flowchart TD
     A([push / workflow_dispatch]) --> B[Checkout]
-    B --> C[Setup Node 20]
-    C --> D[Setup Ruby 3.2]
+    B --> C[Setup Node]
+    C --> D[Setup Ruby]
     D --> E{platform?}
     E -->|android| F[Setup JDK 17]
-    E -->|ios| G[skip JDK]
+    E -->|ios| H
     F --> H[Install JS deps]
-    G --> H
     H --> I["bundle exec fastlane<br/>platform lane"]
     I --> J{distribution}
     J -->|firebase| K[Firebase App Distribution]

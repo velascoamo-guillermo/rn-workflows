@@ -115,7 +115,7 @@ flowchart TD
     B --> C[Setup Node]
     C --> D[Setup Ruby]
     D --> E{platform?}
-    E -->|android| F[Setup JDK 17]
+    E -->|android| F[Setup JDK]
     E -->|ios| H
     F --> H[Install JS deps]
     H --> I["bundle exec fastlane<br/>platform lane"]

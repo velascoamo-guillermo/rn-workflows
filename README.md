@@ -91,6 +91,20 @@ Given `ci: gitlab`:
 - `fastlane/Fastfile`, `fastlane/Appfile`, `fastlane/Pluginfile`, `Gemfile`
 - `.gitlab-ci.yml` with one stage per profile × platform
 
+## Requirements
+
+- Node.js `>=20`
+
+## Contributing
+
+```bash
+bun install
+bun test        # run all tests
+bun run build   # compile to dist/
+```
+
+Tests live in `tests/`. Snapshots in `tests/__snapshots__/` are committed — update with `bun test --update-snapshots` after intentional template changes.
+
 ## Roadmap
 
 - `build --profile` local exec

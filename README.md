@@ -105,6 +105,29 @@ Given `ci: gitlab`:
 - `fastlane/Fastfile`, `fastlane/Appfile`, `fastlane/Pluginfile`, `Gemfile`
 - `.gitlab-ci.yml` with one stage per profile × platform
 
+## Generated workflow
+
+Each build profile produces a GitHub Actions workflow with this job structure:
+
+```mermaid
+flowchart TD
+    A([push / workflow_dispatch]) --> B[Checkout]
+    B --> C[Setup Node 20]
+    C --> D[Setup Ruby 3.2]
+    D --> E{platform?}
+    E -->|android| F[Setup JDK 17]
+    E -->|ios| G[skip JDK]
+    F --> H[Install JS deps]
+    G --> H
+    H --> I["bundle exec fastlane<br/>platform lane"]
+    I --> J{distribution}
+    J -->|firebase| K[Firebase App Distribution]
+    J -->|testflight| L[TestFlight]
+    J -->|store| M[Play Store / App Store]
+    J -->|appcenter| N[App Center]
+    J -->|github-releases| O[GitHub Release]
+```
+
 ## Requirements
 
 - Node.js `>=20`

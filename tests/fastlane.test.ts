@@ -61,4 +61,22 @@ describe('fastlane generator', () => {
       'readonly: ENV.fetch("MATCH_READONLY", "true") == "true"',
     );
   });
+
+  it('uses bun install when packageManager is bun', () => {
+    const cfg = parseConfig(fixture('preview-android.yml'));
+    const fastfile = generateFastlane(cfg, { packageManager: 'bun' }).find(
+      (f) => f.path === 'fastlane/Fastfile',
+    )!;
+    expect(fastfile.content).toContain('bun install --frozen-lockfile');
+    expect(fastfile.content).not.toContain('yarn install');
+  });
+
+  it('uses npm ci when packageManager is npm', () => {
+    const cfg = parseConfig(fixture('preview-android.yml'));
+    const fastfile = generateFastlane(cfg, { packageManager: 'npm' }).find(
+      (f) => f.path === 'fastlane/Fastfile',
+    )!;
+    expect(fastfile.content).toContain('npm ci');
+    expect(fastfile.content).not.toContain('yarn install');
+  });
 });

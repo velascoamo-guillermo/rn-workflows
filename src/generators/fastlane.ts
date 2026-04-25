@@ -57,7 +57,11 @@ function toIosView(name: string, profile: BuildProfile, bundleId: string): IosPr
   };
 }
 
-export function generateFastlane(config: Config): GeneratedFile[] {
+export function generateFastlane(
+  config: Config,
+  options: { packageManager?: 'yarn' | 'npm' | 'bun' } = {},
+): GeneratedFile[] {
+  const packageManager = options.packageManager ?? 'yarn';
   const androidProfiles: AndroidProfileView[] = [];
   const iosProfiles: IosProfileView[] = [];
 
@@ -80,6 +84,7 @@ export function generateFastlane(config: Config): GeneratedFile[] {
     projectType: config.project.type,
     bundleId: config.project.bundleId,
     packageName: config.project.packageName,
+    packageManager,
   });
 
   const appfile = renderTemplate('fastlane/Appfile.ejs', {

@@ -8,7 +8,7 @@ platform :android do
   desc "<%= profile.description %>"
   lane :<%= profile.name %> do
 <% if (projectType === 'expo') { -%>
-    sh("cd .. && yarn install --frozen-lockfile")
+    sh("cd .. && <%= packageManager === 'bun' ? 'bun install --frozen-lockfile' : packageManager === 'npm' ? 'npm ci' : 'yarn install --frozen-lockfile' %>")
     sh("cd .. && npx expo prebuild --platform android --no-install")
 <% } -%>
     gradle(
@@ -51,7 +51,7 @@ platform :ios do
   desc "<%= profile.description %>"
   lane :<%= profile.name %> do
 <% if (projectType === 'expo') { -%>
-    sh("cd .. && yarn install --frozen-lockfile")
+    sh("cd .. && <%= packageManager === 'bun' ? 'bun install --frozen-lockfile' : packageManager === 'npm' ? 'npm ci' : 'yarn install --frozen-lockfile' %>")
     sh("cd .. && npx expo prebuild --platform ios --no-install")
     sh("cd .. && cd ios && pod install")
 <% } -%>

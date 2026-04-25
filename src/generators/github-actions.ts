@@ -13,7 +13,11 @@ function branchFor(profileName: string): string {
   return DEFAULT_BRANCH[profileName] ?? 'main';
 }
 
-export function generateGithubActions(config: Config): GeneratedFile[] {
+export function generateGithubActions(
+  config: Config,
+  options: { packageManager?: 'yarn' | 'npm' | 'bun' } = {},
+): GeneratedFile[] {
+  const packageManager = options.packageManager ?? 'yarn';
   const files: GeneratedFile[] = [];
 
   for (const [name, profile] of Object.entries(config.build)) {
@@ -31,6 +35,7 @@ export function generateGithubActions(config: Config): GeneratedFile[] {
       workflowName: `rn-workflows • ${name}`,
       branch: branchFor(name),
       jobs,
+      packageManager,
     });
 
     files.push({ path: `.github/workflows/rn-${name}.yml`, content });

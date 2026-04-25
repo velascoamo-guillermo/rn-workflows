@@ -9,6 +9,13 @@ import { generateGithubActions } from '../generators/github-actions.ts';
 import { generateGitlab } from '../generators/gitlab.ts';
 import { writeFileEnsured } from '../utils/fs.ts';
 
+function detectPackageManager(cwd: string): 'yarn' | 'npm' | 'bun' {
+  if (existsSync(resolve(cwd, 'bun.lock')) || existsSync(resolve(cwd, 'bun.lockb'))) return 'bun';
+  if (existsSync(resolve(cwd, 'yarn.lock'))) return 'yarn';
+  if (existsSync(resolve(cwd, 'package-lock.json'))) return 'npm';
+  return 'yarn';
+}
+
 export default defineCommand({
   meta: {
     name: 'generate',
@@ -62,10 +69,13 @@ export default defineCommand({
       config = { ...config, ci: args.ci as CiProvider };
     }
 
+    const packageManager = detectPackageManager(String(args.cwd));
+    const options = { packageManager };
+
     const files: GeneratedFile[] = [
-      ...generateFastlane(config),
+      ...generateFastlane(config, options),
       ...(config.ci === 'github-actions'
-        ? generateGithubActions(config)
+        ? generateGithubActions(config, options)
         : generateGitlab(config)),
     ];
 

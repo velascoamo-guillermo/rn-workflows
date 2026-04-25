@@ -121,4 +121,17 @@ describe('generateGithubActions', () => {
     const { content } = generateGithubActions(config)[0];
     expect(content).toMatchSnapshot();
   });
+
+  test('bun project uses bun install and bun cache', () => {
+    const { content } = generateGithubActions(baseConfig, { packageManager: 'bun' })[0];
+    expect(content).toContain('bun install --frozen-lockfile');
+    expect(content).toContain('cache: bun');
+    expect(content).not.toContain('yarn install');
+  });
+
+  test('npm project uses npm ci and npm cache', () => {
+    const { content } = generateGithubActions(baseConfig, { packageManager: 'npm' })[0];
+    expect(content).toContain('npm ci');
+    expect(content).toContain('cache: npm');
+  });
 });

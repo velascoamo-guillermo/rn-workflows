@@ -1,50 +1,100 @@
-import { describe, expect, it } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { parseConfig } from '../src/config/parser.ts';
-import { generateGithubActions } from '../src/generators/github-actions.ts';
+import { describe, expect, test } from 'bun:test';
+import yaml from 'js-yaml';
+import { generateGithubActions } from '../src/generators/github-actions';
+import type { Config } from '../src/config/schema';
 
-const fixture = (name: string) =>
-  readFileSync(join(import.meta.dir, 'fixtures', name), 'utf8');
+const baseConfig: Config = {
+  project: { type: 'bare', bundleId: 'com.test.app', packageName: 'com.test.app' },
+  ci: 'github-actions',
+  build: {
+    preview: { platform: 'android', distribution: 'firebase' },
+  },
+};
 
-describe('github-actions generator', () => {
-  it('emits one workflow per profile', () => {
-    const cfg = parseConfig(fixture('production-all.yml'));
-    const files = generateGithubActions(cfg);
-    const paths = files.map((f) => f.path).sort();
-    expect(paths).toEqual([
-      '.github/workflows/rn-preview.yml',
-      '.github/workflows/rn-production.yml',
-      '.github/workflows/rn-staging.yml',
-    ]);
+describe('generateGithubActions', () => {
+  test('outputs one file per build profile', () => {
+    const files = generateGithubActions(baseConfig);
+    expect(files).toHaveLength(1);
+    expect(files[0].path).toBe('.github/workflows/rn-preview.yml');
   });
 
-  it('includes expected firebase secrets', () => {
-    const cfg = parseConfig(fixture('preview-android.yml'));
-    const [file] = generateGithubActions(cfg);
-    expect(file!.content).toContain('FIREBASE_APP_ID_ANDROID');
-    expect(file!.content).toContain('FIREBASE_SERVICE_ACCOUNT_JSON');
-    expect(file!.content).toContain('${{ secrets.FIREBASE_APP_ID_ANDROID }}');
+  test('output is valid YAML', () => {
+    const { content } = generateGithubActions(baseConfig)[0];
+    expect(() => yaml.load(content)).not.toThrow();
   });
 
-  it('uses macos runner for ios jobs', () => {
-    const cfg = parseConfig(fixture('production-all.yml'));
-    const production = generateGithubActions(cfg).find(
-      (f) => f.path === '.github/workflows/rn-production.yml',
-    )!;
-    expect(production.content).toContain('macos-latest');
-    expect(production.content).toContain('ubuntu-latest');
+  test('multiple profiles generate multiple files', () => {
+    const config: Config = {
+      ...baseConfig,
+      build: {
+        preview: { platform: 'android', distribution: 'firebase' },
+        production: { platform: 'ios', distribution: 'store' },
+      },
+    };
+    const files = generateGithubActions(config);
+    expect(files).toHaveLength(2);
+    expect(files.map((f) => f.path)).toContain('.github/workflows/rn-preview.yml');
+    expect(files.map((f) => f.path)).toContain('.github/workflows/rn-production.yml');
   });
 
-  it('sets default branch by profile name', () => {
-    const cfg = parseConfig(fixture('production-all.yml'));
-    const preview = generateGithubActions(cfg).find(
-      (f) => f.path === '.github/workflows/rn-preview.yml',
-    )!;
-    expect(preview.content).toContain('branches: [develop]');
-    const production = generateGithubActions(cfg).find(
-      (f) => f.path === '.github/workflows/rn-production.yml',
-    )!;
-    expect(production.content).toContain('branches: [main]');
+  test('android job runs on ubuntu', () => {
+    const { content } = generateGithubActions(baseConfig)[0];
+    expect(content).toContain('ubuntu-latest');
+  });
+
+  test('ios job runs on macos', () => {
+    const config: Config = {
+      ...baseConfig,
+      build: { preview: { platform: 'ios', distribution: 'testflight' } },
+    };
+    const { content } = generateGithubActions(config)[0];
+    expect(content).toContain('macos-latest');
+  });
+
+  test('all platform creates android and ios jobs in one file', () => {
+    const config: Config = {
+      ...baseConfig,
+      build: { preview: { platform: 'all', distribution: 'firebase' } },
+    };
+    const files = generateGithubActions(config);
+    expect(files).toHaveLength(1);
+    const { content } = files[0];
+    expect(content).toContain('build-android');
+    expect(content).toContain('build-ios');
+  });
+
+  test('firebase android secrets injected as env vars', () => {
+    const { content } = generateGithubActions(baseConfig)[0];
+    expect(content).toContain('FIREBASE_APP_ID_ANDROID');
+    expect(content).toContain('secrets.FIREBASE_APP_ID_ANDROID');
+  });
+
+  test('preview branch targets develop', () => {
+    const { content } = generateGithubActions(baseConfig)[0];
+    expect(content).toContain('develop');
+  });
+
+  test('workflow name includes profile name', () => {
+    const { content } = generateGithubActions(baseConfig)[0];
+    expect(content).toContain('preview');
+  });
+
+  test('android job includes JDK setup step', () => {
+    const { content } = generateGithubActions(baseConfig)[0];
+    expect(content).toContain('setup-java');
+  });
+
+  test('ios job does not include JDK setup step', () => {
+    const config: Config = {
+      ...baseConfig,
+      build: { preview: { platform: 'ios', distribution: 'testflight' } },
+    };
+    const { content } = generateGithubActions(config)[0];
+    expect(content).not.toContain('setup-java');
+  });
+
+  test('output matches snapshot', () => {
+    const { content } = generateGithubActions(baseConfig)[0];
+    expect(content).toMatchSnapshot();
   });
 });

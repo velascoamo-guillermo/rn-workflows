@@ -112,4 +112,13 @@ describe('generateGithubActions', () => {
     const { content } = generateGithubActions(baseConfig)[0];
     expect(content).toMatchSnapshot();
   });
+
+  test('ios output matches snapshot', () => {
+    const config: Config = {
+      ...baseConfig,
+      build: { preview: { platform: 'ios', distribution: 'testflight' } },
+    };
+    const { content } = generateGithubActions(config)[0];
+    expect(content).toMatchSnapshot();
+  });
 });

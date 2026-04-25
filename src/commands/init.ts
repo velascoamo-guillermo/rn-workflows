@@ -68,7 +68,7 @@ export default defineCommand({
       message: 'Build profiles to generate',
       options: [
         { value: 'preview', label: 'preview (android-only, firebase)' },
-        { value: 'staging', label: 'staging (android+ios, testflight + firebase)' },
+        { value: 'staging', label: 'staging (android+ios, ad-hoc)' },
         { value: 'production', label: 'production (android+ios, store)' },
       ],
       initialValues: ['preview', 'production'],

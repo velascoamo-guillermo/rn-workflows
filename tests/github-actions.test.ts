@@ -93,6 +93,21 @@ describe('generateGithubActions', () => {
     expect(content).not.toContain('setup-java');
   });
 
+  test('ios job includes setup-xcode step', () => {
+    const config: Config = {
+      ...baseConfig,
+      build: { preview: { platform: 'ios', distribution: 'testflight' } },
+    };
+    const { content } = generateGithubActions(config)[0];
+    expect(content).toContain('maxim-lobanov/setup-xcode@v1');
+    expect(content).toContain('xcode-version: latest-stable');
+  });
+
+  test('android job does not include setup-xcode step', () => {
+    const { content } = generateGithubActions(baseConfig)[0];
+    expect(content).not.toContain('setup-xcode');
+  });
+
   test('output matches snapshot', () => {
     const { content } = generateGithubActions(baseConfig)[0];
     expect(content).toMatchSnapshot();

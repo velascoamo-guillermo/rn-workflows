@@ -29,6 +29,13 @@ jobs:
           ruby-version: 3.2
           bundler-cache: true
 
+<% if (job.platform === 'ios') { -%>
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+<% } -%>
 <% if (job.platform === 'android') { -%>
       - name: Setup JDK
         uses: actions/setup-java@v4

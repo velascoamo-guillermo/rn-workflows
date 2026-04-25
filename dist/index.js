@@ -532,7 +532,7 @@ var generate_default = defineCommand2({
 import { defineCommand as defineCommand3 } from "citty";
 import { resolve as resolve3 } from "node:path";
 import { existsSync as existsSync5 } from "node:fs";
-import * as p8 from "@clack/prompts";
+import * as p5 from "@clack/prompts";
 
 // src/setup/runner.ts
 import * as p3 from "@clack/prompts";
@@ -561,7 +561,6 @@ async function runSteps(steps, ctx) {
 import { tmpdir } from "node:os";
 import { join as join2 } from "node:path";
 import { unlinkSync, readFileSync as readFileSync3 } from "node:fs";
-import * as p4 from "@clack/prompts";
 
 // src/setup/shell.ts
 import { spawnSync } from "node:child_process";
@@ -578,6 +577,17 @@ function isAvailable(cmd) {
   return result.status === 0;
 }
 
+// src/setup/prompts.ts
+import * as p4 from "@clack/prompts";
+async function promptText(message, options) {
+  const val = await p4.text({ message, ...options, validate: (v) => v?.trim() ? undefined : "Required" });
+  if (typeof val === "symbol") {
+    p4.cancel("Cancelled.");
+    process.exit(0);
+  }
+  return val;
+}
+
 // src/setup/firebase.ts
 function makeFirebaseAppsStep() {
   return {
@@ -590,38 +600,46 @@ function makeFirebaseAppsStep() {
       if (!usesFirebase) {
         return { skipped: true, note: "no firebase distribution" };
       }
+      const needsAndroid = Object.values(ctx.config.build).some((pr) => pr.distribution.includes("firebase") && (pr.platform === "android" || pr.platform === "all"));
+      const needsIos = Object.values(ctx.config.build).some((pr) => pr.distribution.includes("firebase") && (pr.platform === "ios" || pr.platform === "all"));
       if (!isAvailable("firebase")) {
-        const androidId = await promptManual("Firebase App ID (Android)");
-        const iosId = await promptManual("Firebase App ID (iOS)");
-        ctx.collectedSecrets["FIREBASE_APP_ID_ANDROID"] = androidId;
-        ctx.collectedSecrets["FIREBASE_APP_ID_IOS"] = iosId;
+        if (needsAndroid) {
+          ctx.collectedSecrets["FIREBASE_APP_ID_ANDROID"] = await promptText("Firebase App ID (Android)");
+        }
+        if (needsIos) {
+          ctx.collectedSecrets["FIREBASE_APP_ID_IOS"] = await promptText("Firebase App ID (iOS)");
+        }
         return { skipped: false, note: "entered manually (firebase CLI not found)" };
       }
       const listResult = shell("firebase", ["apps:list", "--project", projectId, "--json"]);
       const apps = JSON.parse(listResult.stdout || "[]").result ?? [];
-      const hasAndroid = apps.some((a) => a.platform === "ANDROID" && a.packageName === packageName);
-      const hasIos = apps.some((a) => a.platform === "IOS" && a.bundleId === bundleId);
-      if (!hasAndroid) {
+      const hasAndroid = apps.some((a) => a.platform === "ANDROID" && a.namespace === packageName);
+      const hasIos = apps.some((a) => a.platform === "IOS" && a.namespace === bundleId);
+      if (needsAndroid && !hasAndroid) {
         const r = shell("firebase", ["apps:create", "ANDROID", "--package-name", packageName, "--project", projectId]);
         if (r.exitCode !== 0)
           throw new Error(`Failed to create Android app: ${r.stderr}`);
       }
-      if (!hasIos) {
+      if (needsIos && !hasIos) {
         const r = shell("firebase", ["apps:create", "IOS", "--bundle-id", bundleId, "--project", projectId]);
         if (r.exitCode !== 0)
           throw new Error(`Failed to create iOS app: ${r.stderr}`);
       }
       const updated = shell("firebase", ["apps:list", "--project", projectId, "--json"]);
       const updatedApps = JSON.parse(updated.stdout || "[]").result ?? [];
-      const androidApp = updatedApps.find((a) => a.platform === "ANDROID" && a.packageName === packageName);
-      const iosApp = updatedApps.find((a) => a.platform === "IOS" && a.bundleId === bundleId);
-      if (androidApp)
-        ctx.collectedSecrets["FIREBASE_APP_ID_ANDROID"] = androidApp.appId;
-      if (iosApp)
-        ctx.collectedSecrets["FIREBASE_APP_ID_IOS"] = iosApp.appId;
+      if (needsAndroid) {
+        const androidApp = updatedApps.find((a) => a.platform === "ANDROID" && a.namespace === packageName);
+        if (androidApp)
+          ctx.collectedSecrets["FIREBASE_APP_ID_ANDROID"] = androidApp.appId;
+      }
+      if (needsIos) {
+        const iosApp = updatedApps.find((a) => a.platform === "IOS" && a.namespace === bundleId);
+        if (iosApp)
+          ctx.collectedSecrets["FIREBASE_APP_ID_IOS"] = iosApp.appId;
+      }
       return {
-        skipped: hasAndroid && hasIos,
-        note: hasAndroid && hasIos ? "already existed" : "created"
+        skipped: (!needsAndroid || hasAndroid) && (!needsIos || hasIos),
+        note: (!needsAndroid || hasAndroid) && (!needsIos || hasIos) ? "already existed" : "created"
       };
     }
   };
@@ -639,7 +657,7 @@ function makeServiceAccountStep() {
         return { skipped: true, note: "already collected" };
       }
       if (!isAvailable("gcloud")) {
-        const json2 = await promptManual("Paste Firebase service account JSON");
+        const json2 = await promptText("Paste Firebase service account JSON");
         ctx.collectedSecrets["FIREBASE_SERVICE_ACCOUNT_JSON"] = json2;
         return { skipped: false, note: "entered manually (gcloud not found)" };
       }
@@ -668,20 +686,18 @@ function makeServiceAccountStep() {
       ]);
       if (r.exitCode !== 0)
         throw new Error(`gcloud key create failed: ${r.stderr}`);
-      const json = readFileSync3(tmpPath, "utf8");
+      let json;
+      try {
+        json = readFileSync3(tmpPath, "utf8");
+      } finally {
+        try {
+          unlinkSync(tmpPath);
+        } catch {}
+      }
       ctx.collectedSecrets["FIREBASE_SERVICE_ACCOUNT_JSON"] = json;
-      unlinkSync(tmpPath);
       return { skipped: false, note: "key created and collected" };
     }
   };
-}
-async function promptManual(message) {
-  const val = await p4.text({ message, validate: (v) => v?.trim() ? undefined : "Required" });
-  if (typeof val === "symbol") {
-    p4.cancel("Cancelled.");
-    process.exit(0);
-  }
-  return val;
 }
 
 // src/setup/match.ts
@@ -712,6 +728,15 @@ function makeMatchRepoStep() {
         return { skipped: false, note: fullName };
       }
       if (ctx.config.ci === "gitlab") {
+        const checkUrl = `https://gitlab.com/api/v4/projects/${encodeURIComponent(repoName)}`;
+        const checkRes = await fetch(checkUrl, {
+          headers: { "PRIVATE-TOKEN": ctx.gitlabToken }
+        });
+        if (checkRes.ok) {
+          const existing = await checkRes.json();
+          ctx.collectedSecrets["MATCH_GIT_URL"] = existing.http_url_to_repo;
+          return { skipped: true, note: "repo already exists" };
+        }
         const res = await fetch("https://gitlab.com/api/v4/projects", {
           method: "POST",
           headers: { "PRIVATE-TOKEN": ctx.gitlabToken, "Content-Type": "application/json" },
@@ -791,13 +816,12 @@ async function setGitlabVariable(projectId, token, key, value) {
   const res = await fetch(url, {
     method: "POST",
     headers: { "PRIVATE-TOKEN": token, "Content-Type": "application/json" },
-    body: JSON.stringify({ key, value, protected: false, masked: true })
+    body: JSON.stringify({ key, value, protected: false, masked: false })
   });
   return res.ok;
 }
 
 // src/setup/appcenter.ts
-import * as p5 from "@clack/prompts";
 function makeAppCenterStep() {
   return {
     id: "appcenter",
@@ -806,6 +830,9 @@ function makeAppCenterStep() {
       const usesAppCenter = Object.values(ctx.config.build).some((pr) => pr.distribution.includes("appcenter"));
       if (!usesAppCenter)
         return { skipped: true, note: "not used" };
+      if (ctx.collectedSecrets["APPCENTER_API_TOKEN"]) {
+        return { skipped: true, note: "already collected" };
+      }
       const token = await promptText("AppCenter API token");
       const owner = await promptText("AppCenter owner name");
       const hasAndroid = Object.values(ctx.config.build).some((pr) => pr.distribution.includes("appcenter") && (pr.platform === "android" || pr.platform === "all"));
@@ -820,18 +847,9 @@ function makeAppCenterStep() {
     }
   };
 }
-async function promptText(message) {
-  const val = await p5.text({ message, validate: (v) => v?.trim() ? undefined : "Required" });
-  if (typeof val === "symbol") {
-    p5.cancel("Cancelled.");
-    process.exit(0);
-  }
-  return val;
-}
 
 // src/setup/appstore.ts
-import { existsSync as existsSync3 } from "node:fs";
-import * as p6 from "@clack/prompts";
+import { existsSync as existsSync3, readFileSync as readFileSync4 } from "node:fs";
 function makeAppStoreStep() {
   return {
     id: "appstore",
@@ -844,28 +862,22 @@ function makeAppStoreStep() {
       });
       if (!needsAppStore)
         return { skipped: true, note: "not used" };
-      const teamId = await promptText2("Apple Team ID (e.g. ABCD1234)");
+      if (ctx.collectedSecrets["APPLE_TEAM_ID"]) {
+        return { skipped: true, note: "already collected" };
+      }
+      const teamId = await promptText("Apple Team ID (e.g. ABCD1234)");
       ctx.collectedSecrets["APPLE_TEAM_ID"] = teamId;
-      const keyPath = await promptText2("Path to App Store Connect API key JSON");
+      const keyPath = await promptText("Path to App Store Connect API key JSON");
       if (!existsSync3(keyPath))
         throw new Error(`File not found: ${keyPath}`);
-      ctx.collectedSecrets["APP_STORE_CONNECT_API_KEY_PATH"] = keyPath;
+      ctx.collectedSecrets["APP_STORE_CONNECT_API_KEY_PATH"] = readFileSync4(keyPath, "utf8");
       return { skipped: false };
     }
   };
 }
-async function promptText2(message) {
-  const val = await p6.text({ message, validate: (v) => v?.trim() ? undefined : "Required" });
-  if (typeof val === "symbol") {
-    p6.cancel("Cancelled.");
-    process.exit(0);
-  }
-  return val;
-}
 
 // src/setup/playstore.ts
-import { existsSync as existsSync4 } from "node:fs";
-import * as p7 from "@clack/prompts";
+import { existsSync as existsSync4, readFileSync as readFileSync5 } from "node:fs";
 function makePlayStoreStep() {
   return {
     id: "playstore",
@@ -878,21 +890,16 @@ function makePlayStoreStep() {
       });
       if (!needsPlayStore)
         return { skipped: true, note: "not used" };
-      const keyPath = await promptText3("Path to Play Store JSON key file");
+      if (ctx.collectedSecrets["PLAY_STORE_JSON_KEY"]) {
+        return { skipped: true, note: "already collected" };
+      }
+      const keyPath = await promptText("Path to Play Store JSON key file");
       if (!existsSync4(keyPath))
         throw new Error(`File not found: ${keyPath}`);
-      ctx.collectedSecrets["PLAY_STORE_JSON_KEY"] = keyPath;
+      ctx.collectedSecrets["PLAY_STORE_JSON_KEY"] = readFileSync5(keyPath, "utf8");
       return { skipped: false };
     }
   };
-}
-async function promptText3(message) {
-  const val = await p7.text({ message, validate: (v) => v?.trim() ? undefined : "Required" });
-  if (typeof val === "symbol") {
-    p7.cancel("Cancelled.");
-    process.exit(0);
-  }
-  return val;
 }
 
 // src/commands/setup.ts
@@ -910,11 +917,11 @@ var setup_default = defineCommand3({
     "dry-run": { type: "boolean", description: "Print steps without executing", default: false }
   },
   async run({ args }) {
-    p8.intro("rn-workflows setup");
+    p5.intro("rn-workflows setup");
     const configPath = resolve3(String(args.cwd), String(args.config));
     if (!existsSync5(configPath)) {
-      p8.log.error(`Config not found: ${configPath}`);
-      p8.log.info("Run `rn-workflows init` first.");
+      p5.log.error(`Config not found: ${configPath}`);
+      p5.log.info("Run `rn-workflows init` first.");
       process.exit(1);
     }
     let config;
@@ -922,7 +929,7 @@ var setup_default = defineCommand3({
       config = loadConfig(configPath);
     } catch (err) {
       if (err instanceof ConfigError) {
-        p8.log.error(err.message);
+        p5.log.error(err.message);
         process.exit(1);
       }
       throw err;
@@ -933,17 +940,24 @@ var setup_default = defineCommand3({
       collectedSecrets: {}
     };
     if (config.ci === "github-actions") {
-      ctx.githubRepo = args["github-repo"] ? String(args["github-repo"]) : String(await p8.text({
-        message: "GitHub repo (owner/repo)",
-        validate: (v) => v && v.includes("/") ? undefined : "Format: owner/repo"
-      }));
-      assertNotCancelled2(ctx.githubRepo);
+      if (args["github-repo"]) {
+        ctx.githubRepo = String(args["github-repo"]);
+      } else {
+        const raw = await p5.text({
+          message: "GitHub repo (owner/repo)",
+          validate: (v) => v && v.includes("/") ? undefined : "Format: owner/repo"
+        });
+        assertNotCancelled2(raw);
+        ctx.githubRepo = String(raw);
+      }
     }
     if (config.ci === "gitlab") {
-      ctx.gitlabProjectId = String(await p8.text({ message: "GitLab project ID or path", validate: (v) => v?.trim() ? undefined : "Required" }));
-      assertNotCancelled2(ctx.gitlabProjectId);
-      ctx.gitlabToken = String(await p8.text({ message: "GitLab personal access token", validate: (v) => v?.trim() ? undefined : "Required" }));
-      assertNotCancelled2(ctx.gitlabToken);
+      const rawProjectId = await p5.text({ message: "GitLab project ID or path", validate: (v) => v?.trim() ? undefined : "Required" });
+      assertNotCancelled2(rawProjectId);
+      ctx.gitlabProjectId = String(rawProjectId);
+      const rawToken = await p5.text({ message: "GitLab personal access token", validate: (v) => v?.trim() ? undefined : "Required" });
+      assertNotCancelled2(rawToken);
+      ctx.gitlabToken = String(rawToken);
     }
     const usesFirebase = Object.values(config.build).some((pr) => pr.distribution.includes("firebase"));
     if (usesFirebase) {
@@ -956,15 +970,25 @@ var setup_default = defineCommand3({
     const hasIos = Object.values(config.build).some((pr) => pr.platform === "ios" || pr.platform === "all");
     if (hasIos) {
       const defaultName = `${config.project.bundleId.split(".").pop()}-match`;
-      ctx.matchRepoName = args["match-repo-name"] ? String(args["match-repo-name"]) : String(await p8.text({
-        message: "Match repo name",
-        placeholder: defaultName,
-        defaultValue: defaultName
-      }));
-      assertNotCancelled2(ctx.matchRepoName);
-      const pw = String(await p8.password({ message: "Match encryption password (MATCH_PASSWORD)" }));
-      assertNotCancelled2(pw);
-      ctx.collectedSecrets["MATCH_PASSWORD"] = pw;
+      if (args["match-repo-name"]) {
+        ctx.matchRepoName = String(args["match-repo-name"]);
+      } else {
+        const rawMatchRepo = await p5.text({
+          message: "Match repo name",
+          placeholder: defaultName,
+          defaultValue: defaultName
+        });
+        assertNotCancelled2(rawMatchRepo);
+        ctx.matchRepoName = String(rawMatchRepo);
+      }
+      const rawPw = await p5.password({ message: "Match encryption password (MATCH_PASSWORD)" });
+      assertNotCancelled2(rawPw);
+      ctx.collectedSecrets["MATCH_PASSWORD"] = String(rawPw);
+    }
+    const usesGithubReleases = Object.values(config.build).some((pr) => pr.distribution.includes("github-releases"));
+    if (usesGithubReleases) {
+      const token = await promptText("GitHub token for releases (GITHUB_TOKEN)");
+      ctx.collectedSecrets["GITHUB_TOKEN"] = token;
     }
     await runSteps([
       makeFirebaseAppsStep(),
@@ -975,12 +999,12 @@ var setup_default = defineCommand3({
       makePlayStoreStep(),
       makeSecretsStep()
     ], ctx);
-    p8.log.success("Setup complete!");
+    p5.log.success("Setup complete!");
     if (hasIos) {
-      p8.log.warn("Next: seed match certificates manually:");
-      p8.log.info("  MATCH_READONLY=false bundle exec fastlane match adhoc");
+      p5.log.warn("Next: seed match certificates manually:");
+      p5.log.info("  MATCH_READONLY=false bundle exec fastlane match adhoc");
     }
-    p8.outro("Done.");
+    p5.outro("Done.");
   }
 });
 async function detectOrPromptFirebaseProject() {
@@ -991,22 +1015,23 @@ async function detectOrPromptFirebaseProject() {
       if (projects.length === 1)
         return projects[0].projectId;
       if (projects.length > 1) {
-        const chosen = await p8.select({
+        const chosen = await p5.select({
           message: "Select Firebase project",
           options: projects.map((pr) => ({ value: pr.projectId, label: `${pr.displayName} (${pr.projectId})` }))
         });
-        assertNotCancelled2(chosen);
+        if (typeof chosen === "symbol") {
+          p5.cancel("Cancelled.");
+          process.exit(0);
+        }
         return String(chosen);
       }
     }
   }
-  const id = await p8.text({ message: "Firebase project ID", validate: (v) => v?.trim() ? undefined : "Required" });
-  assertNotCancelled2(id);
-  return String(id);
+  return await promptText("Firebase project ID");
 }
 function assertNotCancelled2(value) {
   if (typeof value === "symbol") {
-    p8.cancel("Cancelled.");
+    p5.cancel("Cancelled.");
     process.exit(0);
   }
 }

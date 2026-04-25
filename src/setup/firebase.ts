@@ -39,11 +39,11 @@ export function makeFirebaseAppsStep() {
       }
 
       const listResult = shell('firebase', ['apps:list', '--project', projectId, '--json']);
-      type FbApp = { appId: string; platform: string; packageName?: string; bundleId?: string };
+      type FbApp = { appId: string; platform: string; namespace?: string };
       const apps: FbApp[] = JSON.parse(listResult.stdout || '[]').result ?? [];
 
-      const hasAndroid = apps.some(a => a.platform === 'ANDROID' && a.packageName === packageName);
-      const hasIos = apps.some(a => a.platform === 'IOS' && a.bundleId === bundleId);
+      const hasAndroid = apps.some(a => a.platform === 'ANDROID' && a.namespace === packageName);
+      const hasIos = apps.some(a => a.platform === 'IOS' && a.namespace === bundleId);
 
       if (needsAndroid && !hasAndroid) {
         const r = shell('firebase', ['apps:create', 'ANDROID', '--package-name', packageName, '--project', projectId]);
@@ -58,11 +58,11 @@ export function makeFirebaseAppsStep() {
       const updatedApps: FbApp[] = JSON.parse(updated.stdout || '[]').result ?? [];
 
       if (needsAndroid) {
-        const androidApp = updatedApps.find(a => a.platform === 'ANDROID' && a.packageName === packageName);
+        const androidApp = updatedApps.find(a => a.platform === 'ANDROID' && a.namespace === packageName);
         if (androidApp) ctx.collectedSecrets['FIREBASE_APP_ID_ANDROID'] = androidApp.appId;
       }
       if (needsIos) {
-        const iosApp = updatedApps.find(a => a.platform === 'IOS' && a.bundleId === bundleId);
+        const iosApp = updatedApps.find(a => a.platform === 'IOS' && a.namespace === bundleId);
         if (iosApp) ctx.collectedSecrets['FIREBASE_APP_ID_IOS'] = iosApp.appId;
       }
 

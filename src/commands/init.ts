@@ -96,9 +96,7 @@ export default defineCommand({
     if (profiles.includes('staging')) {
       build.staging = {
         platform: 'all',
-        distribution: distributions.includes('firebase')
-          ? 'testflight+firebase'
-          : 'testflight',
+        distribution: previewDist,
         android: { buildType: 'apk' },
         ios: { exportMethod: 'ad-hoc' },
       };

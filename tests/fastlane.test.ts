@@ -57,7 +57,8 @@ describe('fastlane generator', () => {
   it('Fastfile match call uses MATCH_READONLY env var instead of hardcoded true', () => {
     const cfg = parseConfig(fixture('production-all.yml'));
     const fastfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Fastfile')!;
-    expect(fastfile.content).toContain('MATCH_READONLY');
-    expect(fastfile.content).not.toContain('readonly: true');
+    expect(fastfile.content).toContain(
+      'readonly: ENV.fetch("MATCH_READONLY", "true") == "true"',
+    );
   });
 });

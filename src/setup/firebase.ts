@@ -2,9 +2,9 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { unlinkSync, readFileSync } from 'node:fs';
-import * as p from '@clack/prompts';
 import { shell, isAvailable } from './shell.ts';
 import type { SetupContext, StepResult } from './types.ts';
+import { promptText } from './prompts.ts';
 
 export function makeFirebaseAppsStep() {
   return {
@@ -21,11 +21,20 @@ export function makeFirebaseAppsStep() {
         return { skipped: true, note: 'no firebase distribution' };
       }
 
+      const needsAndroid = Object.values(ctx.config.build).some(
+        pr => pr.distribution.includes('firebase') && (pr.platform === 'android' || pr.platform === 'all'),
+      );
+      const needsIos = Object.values(ctx.config.build).some(
+        pr => pr.distribution.includes('firebase') && (pr.platform === 'ios' || pr.platform === 'all'),
+      );
+
       if (!isAvailable('firebase')) {
-        const androidId = await promptManual('Firebase App ID (Android)');
-        const iosId = await promptManual('Firebase App ID (iOS)');
-        ctx.collectedSecrets['FIREBASE_APP_ID_ANDROID'] = androidId;
-        ctx.collectedSecrets['FIREBASE_APP_ID_IOS'] = iosId;
+        if (needsAndroid) {
+          ctx.collectedSecrets['FIREBASE_APP_ID_ANDROID'] = await promptText('Firebase App ID (Android)');
+        }
+        if (needsIos) {
+          ctx.collectedSecrets['FIREBASE_APP_ID_IOS'] = await promptText('Firebase App ID (iOS)');
+        }
         return { skipped: false, note: 'entered manually (firebase CLI not found)' };
       }
 
@@ -36,11 +45,11 @@ export function makeFirebaseAppsStep() {
       const hasAndroid = apps.some(a => a.platform === 'ANDROID' && a.packageName === packageName);
       const hasIos = apps.some(a => a.platform === 'IOS' && a.bundleId === bundleId);
 
-      if (!hasAndroid) {
+      if (needsAndroid && !hasAndroid) {
         const r = shell('firebase', ['apps:create', 'ANDROID', '--package-name', packageName, '--project', projectId]);
         if (r.exitCode !== 0) throw new Error(`Failed to create Android app: ${r.stderr}`);
       }
-      if (!hasIos) {
+      if (needsIos && !hasIos) {
         const r = shell('firebase', ['apps:create', 'IOS', '--bundle-id', bundleId, '--project', projectId]);
         if (r.exitCode !== 0) throw new Error(`Failed to create iOS app: ${r.stderr}`);
       }
@@ -48,15 +57,18 @@ export function makeFirebaseAppsStep() {
       const updated = shell('firebase', ['apps:list', '--project', projectId, '--json']);
       const updatedApps: FbApp[] = JSON.parse(updated.stdout || '[]').result ?? [];
 
-      const androidApp = updatedApps.find(a => a.platform === 'ANDROID' && a.packageName === packageName);
-      const iosApp = updatedApps.find(a => a.platform === 'IOS' && a.bundleId === bundleId);
-
-      if (androidApp) ctx.collectedSecrets['FIREBASE_APP_ID_ANDROID'] = androidApp.appId;
-      if (iosApp) ctx.collectedSecrets['FIREBASE_APP_ID_IOS'] = iosApp.appId;
+      if (needsAndroid) {
+        const androidApp = updatedApps.find(a => a.platform === 'ANDROID' && a.packageName === packageName);
+        if (androidApp) ctx.collectedSecrets['FIREBASE_APP_ID_ANDROID'] = androidApp.appId;
+      }
+      if (needsIos) {
+        const iosApp = updatedApps.find(a => a.platform === 'IOS' && a.bundleId === bundleId);
+        if (iosApp) ctx.collectedSecrets['FIREBASE_APP_ID_IOS'] = iosApp.appId;
+      }
 
       return {
-        skipped: hasAndroid && hasIos,
-        note: hasAndroid && hasIos ? 'already existed' : 'created',
+        skipped: (!needsAndroid || hasAndroid) && (!needsIos || hasIos),
+        note: (!needsAndroid || hasAndroid) && (!needsIos || hasIos) ? 'already existed' : 'created',
       };
     },
   };
@@ -79,7 +91,7 @@ export function makeServiceAccountStep() {
       }
 
       if (!isAvailable('gcloud')) {
-        const json = await promptManual('Paste Firebase service account JSON');
+        const json = await promptText('Paste Firebase service account JSON');
         ctx.collectedSecrets['FIREBASE_SERVICE_ACCOUNT_JSON'] = json;
         return { skipped: false, note: 'entered manually (gcloud not found)' };
       }
@@ -102,17 +114,15 @@ export function makeServiceAccountStep() {
       ]);
       if (r.exitCode !== 0) throw new Error(`gcloud key create failed: ${r.stderr}`);
 
-      const json = readFileSync(tmpPath, 'utf8');
-      ctx.collectedSecrets['FIREBASE_SERVICE_ACCOUNT_JSON'] = json;
-      unlinkSync(tmpPath);
+      let json: string;
+      try {
+        json = readFileSync(tmpPath, 'utf8');
+      } finally {
+        try { unlinkSync(tmpPath); } catch { /* file may not exist */ }
+      }
+      ctx.collectedSecrets['FIREBASE_SERVICE_ACCOUNT_JSON'] = json!;
 
       return { skipped: false, note: 'key created and collected' };
     },
   };
-}
-
-async function promptManual(message: string): Promise<string> {
-  const val = await p.text({ message, validate: v => (v?.trim() ? undefined : 'Required') });
-  if (typeof val === 'symbol') { p.cancel('Cancelled.'); process.exit(0); }
-  return val;
 }

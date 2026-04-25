@@ -66,7 +66,7 @@ async function setGitlabVariable(projectId: string, token: string, key: string, 
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'PRIVATE-TOKEN': token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key, value, protected: false, masked: true }),
+    body: JSON.stringify({ key, value, protected: false, masked: false }),
   });
   return res.ok;
 }

@@ -1,7 +1,7 @@
 // src/setup/appstore.ts
-import { existsSync } from 'node:fs';
-import * as p from '@clack/prompts';
+import { existsSync, readFileSync } from 'node:fs';
 import type { SetupContext, StepResult } from './types.ts';
+import { promptText } from './prompts.ts';
 
 export function makeAppStoreStep() {
   return {
@@ -15,20 +15,18 @@ export function makeAppStoreStep() {
       });
       if (!needsAppStore) return { skipped: true, note: 'not used' };
 
+      if (ctx.collectedSecrets['APPLE_TEAM_ID']) {
+        return { skipped: true, note: 'already collected' };
+      }
+
       const teamId = await promptText('Apple Team ID (e.g. ABCD1234)');
       ctx.collectedSecrets['APPLE_TEAM_ID'] = teamId;
 
       const keyPath = await promptText('Path to App Store Connect API key JSON');
       if (!existsSync(keyPath)) throw new Error(`File not found: ${keyPath}`);
-      ctx.collectedSecrets['APP_STORE_CONNECT_API_KEY_PATH'] = keyPath;
+      ctx.collectedSecrets['APP_STORE_CONNECT_API_KEY_PATH'] = readFileSync(keyPath, 'utf8');
 
       return { skipped: false };
     },
   };
-}
-
-async function promptText(message: string): Promise<string> {
-  const val = await p.text({ message, validate: v => (v?.trim() ? undefined : 'Required') });
-  if (typeof val === 'symbol') { p.cancel('Cancelled.'); process.exit(0); }
-  return val;
 }

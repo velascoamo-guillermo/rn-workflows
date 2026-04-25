@@ -1,7 +1,7 @@
 // src/setup/playstore.ts
-import { existsSync } from 'node:fs';
-import * as p from '@clack/prompts';
+import { existsSync, readFileSync } from 'node:fs';
 import type { SetupContext, StepResult } from './types.ts';
+import { promptText } from './prompts.ts';
 
 export function makePlayStoreStep() {
   return {
@@ -15,17 +15,15 @@ export function makePlayStoreStep() {
       });
       if (!needsPlayStore) return { skipped: true, note: 'not used' };
 
+      if (ctx.collectedSecrets['PLAY_STORE_JSON_KEY']) {
+        return { skipped: true, note: 'already collected' };
+      }
+
       const keyPath = await promptText('Path to Play Store JSON key file');
       if (!existsSync(keyPath)) throw new Error(`File not found: ${keyPath}`);
-      ctx.collectedSecrets['PLAY_STORE_JSON_KEY'] = keyPath;
+      ctx.collectedSecrets['PLAY_STORE_JSON_KEY'] = readFileSync(keyPath, 'utf8');
 
       return { skipped: false };
     },
   };
-}
-
-async function promptText(message: string): Promise<string> {
-  const val = await p.text({ message, validate: v => (v?.trim() ? undefined : 'Required') });
-  if (typeof val === 'symbol') { p.cancel('Cancelled.'); process.exit(0); }
-  return val;
 }

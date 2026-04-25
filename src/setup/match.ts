@@ -33,6 +33,17 @@ export function makeMatchRepoStep() {
       }
 
       if (ctx.config.ci === 'gitlab') {
+        // Check if project exists first
+        const checkUrl = `https://gitlab.com/api/v4/projects/${encodeURIComponent(repoName)}`;
+        const checkRes = await fetch(checkUrl, {
+          headers: { 'PRIVATE-TOKEN': ctx.gitlabToken! },
+        });
+        if (checkRes.ok) {
+          const existing = await checkRes.json() as { http_url_to_repo: string };
+          ctx.collectedSecrets['MATCH_GIT_URL'] = existing.http_url_to_repo;
+          return { skipped: true, note: 'repo already exists' };
+        }
+
         const res = await fetch('https://gitlab.com/api/v4/projects', {
           method: 'POST',
           headers: { 'PRIVATE-TOKEN': ctx.gitlabToken!, 'Content-Type': 'application/json' },

@@ -1,6 +1,6 @@
 // src/setup/appcenter.ts
-import * as p from '@clack/prompts';
 import type { SetupContext, StepResult } from './types.ts';
+import { promptText } from './prompts.ts';
 
 export function makeAppCenterStep() {
   return {
@@ -11,6 +11,10 @@ export function makeAppCenterStep() {
         pr.distribution.includes('appcenter'),
       );
       if (!usesAppCenter) return { skipped: true, note: 'not used' };
+
+      if (ctx.collectedSecrets['APPCENTER_API_TOKEN']) {
+        return { skipped: true, note: 'already collected' };
+      }
 
       const token = await promptText('AppCenter API token');
       const owner = await promptText('AppCenter owner name');
@@ -30,10 +34,4 @@ export function makeAppCenterStep() {
       return { skipped: false };
     },
   };
-}
-
-async function promptText(message: string): Promise<string> {
-  const val = await p.text({ message, validate: v => (v?.trim() ? undefined : 'Required') });
-  if (typeof val === 'symbol') { p.cancel('Cancelled.'); process.exit(0); }
-  return val;
 }

@@ -13,6 +13,7 @@ import { makeAppStoreStep } from '../setup/appstore.ts';
 import { makePlayStoreStep } from '../setup/playstore.ts';
 import type { SetupContext } from '../setup/types.ts';
 import { isAvailable, shell } from '../setup/shell.ts';
+import { promptText, promptPassword } from '../setup/prompts.ts';
 
 export default defineCommand({
   meta: {
@@ -54,20 +55,26 @@ export default defineCommand({
     // --- Wizard ---
 
     if (config.ci === 'github-actions') {
-      ctx.githubRepo = args['github-repo']
-        ? String(args['github-repo'])
-        : String(await p.text({
-            message: 'GitHub repo (owner/repo)',
-            validate: v => (v && v.includes('/') ? undefined : 'Format: owner/repo'),
-          }));
-      assertNotCancelled(ctx.githubRepo);
+      if (args['github-repo']) {
+        ctx.githubRepo = String(args['github-repo']);
+      } else {
+        const raw = await p.text({
+          message: 'GitHub repo (owner/repo)',
+          validate: v => (v && v.includes('/') ? undefined : 'Format: owner/repo'),
+        });
+        assertNotCancelled(raw);
+        ctx.githubRepo = String(raw);
+      }
     }
 
     if (config.ci === 'gitlab') {
-      ctx.gitlabProjectId = String(await p.text({ message: 'GitLab project ID or path', validate: v => (v?.trim() ? undefined : 'Required') }));
-      assertNotCancelled(ctx.gitlabProjectId);
-      ctx.gitlabToken = String(await p.text({ message: 'GitLab personal access token', validate: v => (v?.trim() ? undefined : 'Required') }));
-      assertNotCancelled(ctx.gitlabToken);
+      const rawProjectId = await p.text({ message: 'GitLab project ID or path', validate: v => (v?.trim() ? undefined : 'Required') });
+      assertNotCancelled(rawProjectId);
+      ctx.gitlabProjectId = String(rawProjectId);
+
+      const rawToken = await p.text({ message: 'GitLab personal access token', validate: v => (v?.trim() ? undefined : 'Required') });
+      assertNotCancelled(rawToken);
+      ctx.gitlabToken = String(rawToken);
     }
 
     const usesFirebase = Object.values(config.build).some(pr => pr.distribution.includes('firebase'));
@@ -82,18 +89,29 @@ export default defineCommand({
     const hasIos = Object.values(config.build).some(pr => pr.platform === 'ios' || pr.platform === 'all');
     if (hasIos) {
       const defaultName = `${config.project.bundleId.split('.').pop()}-match`;
-      ctx.matchRepoName = args['match-repo-name']
-        ? String(args['match-repo-name'])
-        : String(await p.text({
-            message: 'Match repo name',
-            placeholder: defaultName,
-            defaultValue: defaultName,
-          }));
-      assertNotCancelled(ctx.matchRepoName);
+      if (args['match-repo-name']) {
+        ctx.matchRepoName = String(args['match-repo-name']);
+      } else {
+        const rawMatchRepo = await p.text({
+          message: 'Match repo name',
+          placeholder: defaultName,
+          defaultValue: defaultName,
+        });
+        assertNotCancelled(rawMatchRepo);
+        ctx.matchRepoName = String(rawMatchRepo);
+      }
 
-      const pw = String(await p.password({ message: 'Match encryption password (MATCH_PASSWORD)' }));
-      assertNotCancelled(pw);
-      ctx.collectedSecrets['MATCH_PASSWORD'] = pw;
+      const rawPw = await p.password({ message: 'Match encryption password (MATCH_PASSWORD)' });
+      assertNotCancelled(rawPw);
+      ctx.collectedSecrets['MATCH_PASSWORD'] = String(rawPw);
+    }
+
+    const usesGithubReleases = Object.values(config.build).some(pr =>
+      pr.distribution.includes('github-releases'),
+    );
+    if (usesGithubReleases) {
+      const token = await promptText('GitHub token for releases (GITHUB_TOKEN)');
+      ctx.collectedSecrets['GITHUB_TOKEN'] = token;
     }
 
     // --- Steps ---
@@ -130,14 +148,12 @@ async function detectOrPromptFirebaseProject(): Promise<string> {
           message: 'Select Firebase project',
           options: projects.map(pr => ({ value: pr.projectId, label: `${pr.displayName} (${pr.projectId})` })),
         });
-        assertNotCancelled(chosen);
+        if (typeof chosen === 'symbol') { p.cancel('Cancelled.'); process.exit(0); }
         return String(chosen);
       }
     }
   }
-  const id = await p.text({ message: 'Firebase project ID', validate: v => (v?.trim() ? undefined : 'Required') });
-  assertNotCancelled(id);
-  return String(id);
+  return await promptText('Firebase project ID');
 }
 
 function assertNotCancelled(value: unknown): asserts value {

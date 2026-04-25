@@ -122,10 +122,11 @@ describe('generateGithubActions', () => {
     expect(content).toMatchSnapshot();
   });
 
-  test('bun project uses bun install and bun cache', () => {
+  test('bun project uses bun install and setup-bun action', () => {
     const { content } = generateGithubActions(baseConfig, { packageManager: 'bun' })[0];
     expect(content).toContain('bun install --frozen-lockfile');
-    expect(content).toContain('cache: bun');
+    expect(content).toContain('oven-sh/setup-bun@v2');
+    expect(content).not.toContain('cache: bun');
     expect(content).not.toContain('yarn install');
   });
 

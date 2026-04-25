@@ -6,6 +6,20 @@ Open-source CLI alternative to EAS Workflows. Define build profiles in one YAML 
 
 EAS Workflows (Expo) is paid SaaS, tied to Expo, not self-hostable. `rn-workflows` is the open equivalent: works with bare React Native and Expo, supports multiple CI providers, emits plain Fastlane so you can debug and extend locally.
 
+## How it works
+
+```mermaid
+flowchart LR
+    A[rn-workflows.yml] --> B[Parser & Validator]
+    B --> C{Generators}
+    C --> D[Fastlane]
+    C --> E[GitHub Actions]
+    C --> F[GitLab CI]
+    D --> G["fastlane/Fastfile<br/>fastlane/Appfile<br/>Gemfile"]
+    E --> H[".github/workflows/<br/>rn-profile.yml"]
+    F --> I[.gitlab-ci.yml]
+```
+
 ## Install
 
 ```bash

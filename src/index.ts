@@ -2,6 +2,7 @@
 import { defineCommand, runMain } from 'citty';
 import initCommand from './commands/init.ts';
 import generateCommand from './commands/generate.ts';
+import setupCommand from './commands/setup.ts';
 
 const main = defineCommand({
   meta: {
@@ -13,6 +14,7 @@ const main = defineCommand({
   subCommands: {
     init: initCommand,
     generate: generateCommand,
+    setup: setupCommand,
   },
 });
 

@@ -95,3 +95,37 @@ platform :ios do
 end
 
 <% } -%>
+<% if (usesFirebase) { -%>
+lane :add_testers do |options|
+  emails = (options[:emails] || UI.input("Tester emails (comma-separated):")).split(",").map(&:strip)
+  group  = options[:group] || "internal-testers"
+<% if (hasAndroidFirebase) { -%>
+  firebase_app_distribution_add_testers(
+    app: ENV["FIREBASE_APP_ID_ANDROID"],
+    service_credentials_json_data: ENV["FIREBASE_SERVICE_ACCOUNT_JSON"],
+    emails: emails,
+    group_alias: group
+  )
+<% } -%>
+<% if (hasIosFirebase) { -%>
+  firebase_app_distribution_add_testers(
+    app: ENV["FIREBASE_APP_ID_IOS"],
+    service_credentials_json_data: ENV["FIREBASE_SERVICE_ACCOUNT_JSON"],
+    emails: emails,
+    group_alias: group
+  )
+<% } -%>
+end
+
+<% } -%>
+<% if (hasIos) { -%>
+platform :ios do
+  lane :add_device do |options|
+    name = options[:name] || UI.input("Device name:")
+    udid = options[:udid] || UI.input("Device UDID:")
+    register_devices(devices: { name => udid })
+    match(type: "adhoc", force_for_new_devices: true)
+  end
+end
+
+<% } -%>

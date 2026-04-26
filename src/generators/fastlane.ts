@@ -85,6 +85,10 @@ export function generateFastlane(
     bundleId: config.project.bundleId,
     packageName: config.project.packageName,
     packageManager,
+    usesFirebase: allTargets.has('firebase'),
+    hasIos: iosProfiles.length > 0,
+    hasAndroidFirebase: androidProfiles.some((p) => p.targets.includes('firebase')),
+    hasIosFirebase: iosProfiles.some((p) => p.targets.includes('firebase')),
   });
 
   const appfile = renderTemplate('fastlane/Appfile.ejs', {

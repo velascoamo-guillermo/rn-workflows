@@ -97,24 +97,17 @@ end
 <% } -%>
 <% if (usesFirebase) { -%>
 lane :add_testers do |options|
-  emails = (options[:emails] || UI.input("Tester emails (comma-separated):")).split(",").map(&:strip)
-  group  = options[:group] || "internal-testers"
-<% if (hasAndroidFirebase) { -%>
+  emails    = options[:emails] || UI.input("Tester emails (comma-separated):")
+  group     = options[:group] || "internal-testers"
+  creds_file = "/tmp/rn-workflows-sa.json"
+  File.write(creds_file, ENV["FIREBASE_SERVICE_ACCOUNT_JSON"])
   firebase_app_distribution_add_testers(
-    app: ENV["FIREBASE_APP_ID_ANDROID"],
-    service_credentials_json_data: ENV["FIREBASE_SERVICE_ACCOUNT_JSON"],
+    project_number: ENV["FIREBASE_PROJECT_NUMBER"],
+    service_credentials_file: creds_file,
     emails: emails,
     group_alias: group
   )
-<% } -%>
-<% if (hasIosFirebase) { -%>
-  firebase_app_distribution_add_testers(
-    app: ENV["FIREBASE_APP_ID_IOS"],
-    service_credentials_json_data: ENV["FIREBASE_SERVICE_ACCOUNT_JSON"],
-    emails: emails,
-    group_alias: group
-  )
-<% } -%>
+  File.delete(creds_file)
 end
 
 <% } -%>

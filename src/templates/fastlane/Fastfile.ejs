@@ -53,7 +53,7 @@ platform :ios do
 <% if (projectType === 'expo') { -%>
     sh("cd .. && <%= packageManager === 'bun' ? 'bun install --frozen-lockfile' : packageManager === 'npm' ? 'npm ci' : 'yarn install --frozen-lockfile' %>")
     sh("cd .. && npx expo prebuild --platform ios --no-install")
-    sh("cd .. && cd ios && pod install")
+    sh("cd .. && cd ios && BUNDLE_GEMFILE='' pod install")
 <% } -%>
     setup_ci if ENV["CI"]
     match(type: "<%= profile.matchType %>", readonly: ENV.fetch("MATCH_READONLY", "true") == "true") if ENV["MATCH_PASSWORD"]

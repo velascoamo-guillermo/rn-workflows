@@ -7,10 +7,6 @@ default_platform(:android)
 platform :android do
   desc "<%= profile.description %>"
   lane :<%= profile.name %> do
-<% if (projectType === 'expo') { -%>
-    sh("cd .. && <%= packageManager === 'bun' ? 'bun install --frozen-lockfile' : packageManager === 'npm' ? 'npm ci' : 'yarn install --frozen-lockfile' %>")
-    sh("cd .. && npx expo prebuild --platform android --no-install")
-<% } -%>
     gradle(
       task: "<%= profile.gradleTask %>",
       build_type: "Release",
@@ -50,24 +46,27 @@ end
 platform :ios do
   desc "<%= profile.description %>"
   lane :<%= profile.name %> do
-<% if (projectType === 'expo') { -%>
-    sh("cd .. && <%= packageManager === 'bun' ? 'bun install --frozen-lockfile' : packageManager === 'npm' ? 'npm ci' : 'yarn install --frozen-lockfile' %>")
-    sh("cd .. && npx expo prebuild --platform ios --no-install")
-    sh("cd .. && cd ios && BUNDLE_GEMFILE='' pod install")
-<% } -%>
     setup_ci if ENV["CI"]
     match(type: "<%= profile.matchType %>", readonly: ENV.fetch("MATCH_READONLY", "true") == "true") if ENV["MATCH_PASSWORD"]
     build_app(
       workspace: "ios/<%= profile.xcWorkspace %>.xcworkspace",
       scheme: "<%= profile.xcScheme %>",
       export_method: "<%= profile.exportMethod %>",
-      output_directory: "ios/build"
+      output_directory: "ios/build",
+      xcargs: "CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER='match <%= profile.matchType === 'adhoc' ? 'AdHoc' : profile.matchType === 'app-store' ? 'AppStore' : 'Development' %> <%= bundleId %>' CODE_SIGN_IDENTITY='iPhone Distribution'",
+      export_options: {
+        method: "<%= profile.exportMethod %>",
+        provisioningProfiles: {
+          "<%= bundleId %>" => "match <%= profile.matchType === 'adhoc' ? 'AdHoc' : profile.matchType === 'app-store' ? 'AppStore' : 'Development' %> <%= bundleId %>"
+        }
+      }
     )
 <% if (profile.targets.includes('firebase')) { -%>
     firebase_app_distribution(
       app: ENV["FIREBASE_APP_ID_IOS"],
       service_credentials_file: ENV["FIREBASE_SERVICE_ACCOUNT_JSON"],
-      groups: "internal-testers"
+      groups: "internal-testers",
+      googleservice_info_plist_path: "GoogleService-Info.plist"
     )
 <% } -%>
 <% if (profile.targets.includes('testflight')) { -%>

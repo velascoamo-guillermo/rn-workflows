@@ -53,11 +53,27 @@ jobs:
       - name: Install JS dependencies
         run: <%= packageManager === 'bun' ? 'bun install --frozen-lockfile' : packageManager === 'npm' ? 'npm ci' : 'yarn install --frozen-lockfile' %>
 
+<% if (job.platform === 'ios') { -%>
+      - name: Expo Prebuild (iOS)
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Install Pods
+        run: cd ios && pod install --repo-update
+
+<% } -%>
+<% if (job.platform === 'android') { -%>
+      - name: Expo Prebuild (Android)
+        run: npx expo prebuild --platform android --no-install
+
+<% } -%>
       - name: Run Fastlane lane <%= job.lane %> (<%= job.platform %>)
         run: bundle exec fastlane <%= job.platform %> <%= job.lane %>
         env:
 <% for (const secret of job.secrets) { -%>
           <%= secret %>: ${{ secrets.<%= secret %> }}
+<% } -%>
+<% if (job.platform === 'ios' && job.secrets.some(s => s === 'MATCH_PASSWORD')) { -%>
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
 <% } -%>
 
 <% } -%>

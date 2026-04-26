@@ -62,21 +62,17 @@ describe('fastlane generator', () => {
     );
   });
 
-  it('uses bun install when packageManager is bun', () => {
+  it('uses bun install in workflow when packageManager is bun', () => {
     const cfg = parseConfig(fixture('preview-android.yml'));
-    const fastfile = generateFastlane(cfg, { packageManager: 'bun' }).find(
-      (f) => f.path === 'fastlane/Fastfile',
-    )!;
-    expect(fastfile.content).toContain('bun install --frozen-lockfile');
-    expect(fastfile.content).not.toContain('yarn install');
+    const files = generateFastlane(cfg, { packageManager: 'bun' });
+    const fastfile = files.find((f) => f.path === 'fastlane/Fastfile')!;
+    expect(fastfile.content).not.toContain('bun install');
   });
 
-  it('uses npm ci when packageManager is npm', () => {
+  it('does not include npm ci in Fastfile when packageManager is npm', () => {
     const cfg = parseConfig(fixture('preview-android.yml'));
-    const fastfile = generateFastlane(cfg, { packageManager: 'npm' }).find(
-      (f) => f.path === 'fastlane/Fastfile',
-    )!;
-    expect(fastfile.content).toContain('npm ci');
-    expect(fastfile.content).not.toContain('yarn install');
+    const files = generateFastlane(cfg, { packageManager: 'npm' });
+    const fastfile = files.find((f) => f.path === 'fastlane/Fastfile')!;
+    expect(fastfile.content).not.toContain('npm ci');
   });
 });

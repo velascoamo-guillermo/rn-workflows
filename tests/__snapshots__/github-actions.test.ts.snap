@@ -40,11 +40,15 @@ jobs:
       - name: Install JS dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Expo Prebuild (Android)
+        run: npx expo prebuild --platform android --no-install
+
       - name: Run Fastlane lane preview (android)
         run: bundle exec fastlane android preview
         env:
           FIREBASE_APP_ID_ANDROID: \${{ secrets.FIREBASE_APP_ID_ANDROID }}
           FIREBASE_SERVICE_ACCOUNT_JSON: \${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"
 
 "
 `;
@@ -88,6 +92,12 @@ jobs:
       - name: Install JS dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Expo Prebuild (iOS)
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Install Pods
+        run: cd ios && pod install --repo-update
+
       - name: Run Fastlane lane preview (ios)
         run: bundle exec fastlane ios preview
         env:
@@ -95,6 +105,7 @@ jobs:
           APP_STORE_CONNECT_API_KEY_PATH: \${{ secrets.APP_STORE_CONNECT_API_KEY_PATH }}
           MATCH_GIT_URL: \${{ secrets.MATCH_GIT_URL }}
           MATCH_PASSWORD: \${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: \${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
 
 "
 `;

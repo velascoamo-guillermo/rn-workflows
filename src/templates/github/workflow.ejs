@@ -75,5 +75,8 @@ jobs:
 <% if (job.platform === 'ios' && job.secrets.some(s => s === 'MATCH_PASSWORD')) { -%>
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
 <% } -%>
+<% if (job.platform === 'android') { -%>
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"
+<% } -%>
 
 <% } -%>

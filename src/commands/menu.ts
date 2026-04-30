@@ -17,7 +17,9 @@ export const MENU_CHOICES = [
   { value: 'generate', label: 'Generate files', hint: 'Fastlane + CI from rn-workflows.yml' },
   { value: 'setup', label: 'Setup CI/CD', hint: 'Firebase, Match, Secrets' },
   { value: 'add_testers', label: 'Add testers', hint: 'Firebase App Distribution' },
+  { value: 'remove_testers', label: 'Remove testers', hint: 'Firebase App Distribution' },
   { value: 'add_device', label: 'Add device (iOS)', hint: 'Register + regenerate match certs' },
+  { value: 'remove_device', label: 'Remove device (iOS)', hint: 'Disable device in Apple Developer' },
   { value: 'view_profiles', label: 'View profiles (iOS)', hint: 'List provisioning profiles in match repo' },
   { value: 'view_devices', label: 'View devices (iOS)', hint: 'List registered devices from Apple Developer' },
   { value: 'exit', label: 'Exit' },
@@ -55,8 +57,12 @@ export async function runMenu(cwd: string = process.cwd()): Promise<void> {
       await handleSetupMenu(cwd);
     } else if (choice === 'add_testers') {
       await handleAddTesters();
+    } else if (choice === 'remove_testers') {
+      await handleRemoveTesters();
     } else if (choice === 'add_device') {
       await handleAddDevice();
+    } else if (choice === 'remove_device') {
+      await handleRemoveDevice();
     } else if (choice === 'view_profiles') {
       await handleViewProfiles(cwd);
     } else if (choice === 'view_devices') {
@@ -144,6 +150,38 @@ async function handleAddDevice(): Promise<void> {
     p.log.error('add_device failed. Make sure Apple credentials are configured.');
   } else {
     p.log.success('Device registered and match updated.');
+  }
+}
+
+async function handleRemoveTesters(): Promise<void> {
+  const emails = await promptText('Tester emails to remove (comma-separated)');
+
+  p.log.step('Running fastlane remove_testers...');
+  const result = spawnSync(
+    'bundle',
+    ['exec', 'fastlane', 'remove_testers', `emails:${emails}`],
+    { encoding: 'utf8', stdio: 'inherit' },
+  );
+
+  if (result.status !== 0) {
+    p.log.error('remove_testers failed.');
+  } else {
+    p.log.success('Testers removed successfully.');
+  }
+}
+
+async function handleRemoveDevice(): Promise<void> {
+  const udid = await promptText('Device UDID to disable');
+
+  p.log.step('Running fastlane ios remove_device...');
+  const result = spawnSync(
+    'bundle',
+    ['exec', 'fastlane', 'ios', 'remove_device', `udid:${udid}`],
+    { encoding: 'utf8', stdio: 'inherit' },
+  );
+
+  if (result.status !== 0) {
+    p.log.error('remove_device failed. Make sure Apple credentials are configured.');
   }
 }
 

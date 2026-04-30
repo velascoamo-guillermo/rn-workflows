@@ -3,6 +3,18 @@
 
 default_platform(:android)
 
+before_all do
+  if ENV["ASC_KEY_ID"] && ENV["ASC_ISSUER_ID"] && ENV["ASC_KEY_CONTENT"]
+    app_store_connect_api_key(
+      key_id: ENV["ASC_KEY_ID"],
+      issuer_id: ENV["ASC_ISSUER_ID"],
+      key_content: ENV["ASC_KEY_CONTENT"],
+      is_key_content_base64: ENV["ASC_KEY_IS_BASE64"] == "true",
+      in_house: false
+    )
+  end
+end
+
 <% for (const profile of androidProfiles) { -%>
 platform :android do
   desc "<%= profile.description %>"
@@ -110,6 +122,18 @@ lane :add_testers do |options|
   File.delete(creds_file)
 end
 
+lane :remove_testers do |options|
+  emails    = options[:emails] || UI.input("Tester emails to remove (comma-separated):")
+  creds_file = "/tmp/rn-workflows-sa.json"
+  File.write(creds_file, ENV["FIREBASE_SERVICE_ACCOUNT_JSON"])
+  firebase_app_distribution_remove_testers(
+    project_number: ENV["FIREBASE_PROJECT_NUMBER"],
+    service_credentials_file: creds_file,
+    emails: emails
+  )
+  File.delete(creds_file)
+end
+
 <% } -%>
 <% if (hasIos) { -%>
 platform :ios do
@@ -122,11 +146,24 @@ platform :ios do
 
   lane :list_devices do
     require 'spaceship'
-    Spaceship::Portal.login
-    devices = Spaceship::Portal.device.all
+    Spaceship::ConnectAPI.login
+    devices = Spaceship::ConnectAPI::Device.all
     UI.message "\n📱 Registered devices (#{devices.count}):"
     devices.each do |d|
-      UI.message "  #{d.name.ljust(30)} #{d.udid}  [#{d.platform}]"
+      UI.message "  #{d.name.to_s.ljust(30)} #{d.udid}  [#{d.platform}] #{d.status}"
+    end
+  end
+
+  lane :remove_device do |options|
+    udid = options[:udid] || UI.input("Device UDID to disable:")
+    require 'spaceship'
+    Spaceship::ConnectAPI.login
+    device = Spaceship::ConnectAPI::Device.all.find { |d| d.udid == udid }
+    if device
+      device.disable!
+      UI.success("Disabled #{device.name} (#{udid})")
+    else
+      UI.error("Device with UDID #{udid} not found")
     end
   end
 end

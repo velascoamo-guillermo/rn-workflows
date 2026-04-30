@@ -119,6 +119,16 @@ platform :ios do
     register_devices(devices: { name => udid })
     match(type: "adhoc", force_for_new_devices: true)
   end
+
+  lane :list_devices do
+    require 'spaceship'
+    Spaceship::Portal.login
+    devices = Spaceship::Portal.device.all
+    UI.message "\n📱 Registered devices (#{devices.count}):"
+    devices.each do |d|
+      UI.message "  #{d.name.ljust(30)} #{d.udid}  [#{d.platform}]"
+    end
+  end
 end
 
 <% } -%>

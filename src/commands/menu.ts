@@ -148,28 +148,20 @@ async function handleAddDevice(): Promise<void> {
 }
 
 async function handleViewProfiles(cwd: string): Promise<void> {
-  const configPath = resolve(cwd, 'rn-workflows.yml');
-  if (!existsSync(configPath)) {
-    p.log.error('rn-workflows.yml not found. Run Init project first.');
-    return;
-  }
-
-  const matchGitUrl = process.env['MATCH_GIT_URL'];
+  let matchGitUrl = process.env['MATCH_GIT_URL'];
   if (!matchGitUrl) {
-    p.log.error('MATCH_GIT_URL not set. Run Setup CI/CD → Match first.');
-    return;
+    matchGitUrl = await promptText('Match repo URL (MATCH_GIT_URL)', { placeholder: 'https://github.com/owner/match-repo.git' });
   }
 
   p.log.step('Fetching profiles from match repo...');
 
-  // Extract owner/repo from git URL
-  const match = matchGitUrl.match(/github\.com[/:](.+?)(?:\.git)?$/);
-  if (!match) {
-    p.log.error(`Cannot parse GitHub repo from MATCH_GIT_URL: ${matchGitUrl}`);
+  const matchResult = matchGitUrl.match(/github\.com[/:](.+?)(?:\.git)?$/);
+  if (!matchResult) {
+    p.log.error(`Cannot parse GitHub repo from URL: ${matchGitUrl}`);
     return;
   }
 
-  const repo = match[1];
+  const repo = matchResult[1];
   const result = spawnSync('gh', ['api', `repos/${repo}/contents/profiles`, '--jq', '.[].name'], { encoding: 'utf8' });
 
   if (result.status !== 0 || !result.stdout.trim()) {
@@ -181,7 +173,7 @@ async function handleViewProfiles(cwd: string): Promise<void> {
   for (const type of types) {
     const profiles = spawnSync('gh', ['api', `repos/${repo}/contents/profiles/${type}`, '--jq', '.[].name'], { encoding: 'utf8' });
     if (profiles.stdout.trim()) {
-      p.log.info(`\n${type}:`);
+      p.log.info(`${type}:`);
       for (const prof of profiles.stdout.trim().split('\n')) {
         p.log.step(`  ${prof}`);
       }
@@ -194,11 +186,11 @@ async function handleViewDevices(): Promise<void> {
   p.log.step('Fetching registered devices from Apple Developer...');
   const result = spawnSync(
     'bundle',
-    ['exec', 'fastlane', 'run', 'get_registered_devices'],
+    ['exec', 'fastlane', 'ios', 'list_devices'],
     { encoding: 'utf8', stdio: 'inherit' },
   );
 
   if (result.status !== 0) {
-    p.log.error('Failed. Make sure Apple credentials are configured (APPLE_ID env var).');
+    p.log.error('Failed. Make sure APPLE_ID is set and Fastlane is installed.');
   }
 }

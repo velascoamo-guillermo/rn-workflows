@@ -44,9 +44,11 @@ export async function runMenu(cwd: string = process.cwd()): Promise<void> {
     }
 
     if (choice === 'init') {
-      await (initCommand as any).run!({ args: { cwd, force: false, _: [] }, rawArgs: [], cmd: initCommand });
+      const initRun = initCommand.run;
+      if (initRun) await initRun({ args: { cwd, force: false } as any, rawArgs: [], cmd: initCommand as any });
     } else if (choice === 'generate') {
-      await (generateCommand as any).run!({ args: { cwd, config: 'rn-workflows.yml', 'dry-run': false, _: [] }, rawArgs: [], cmd: generateCommand });
+      const generateRun = generateCommand.run;
+      if (generateRun) await generateRun({ args: { cwd, config: 'rn-workflows.yml', 'dry-run': false } as any, rawArgs: [], cmd: generateCommand as any });
     } else if (choice === 'setup') {
       await handleSetupMenu(cwd);
     } else if (choice === 'add_testers') {
@@ -99,7 +101,7 @@ async function handleSetupMenu(cwd: string): Promise<void> {
     await runSteps(selectedSteps, ctx);
     p.log.success('Done!');
   } catch (err) {
-    p.log.error((err as Error).message);
+    p.log.error(err instanceof Error ? err.message : String(err));
   }
 }
 

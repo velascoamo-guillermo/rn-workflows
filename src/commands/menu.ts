@@ -18,6 +18,8 @@ export const MENU_CHOICES = [
   { value: 'setup', label: 'Setup CI/CD', hint: 'Firebase, Match, Secrets' },
   { value: 'add_testers', label: 'Add testers', hint: 'Firebase App Distribution' },
   { value: 'add_device', label: 'Add device (iOS)', hint: 'Register + regenerate match certs' },
+  { value: 'view_profiles', label: 'View profiles (iOS)', hint: 'List provisioning profiles in match repo' },
+  { value: 'view_devices', label: 'View devices (iOS)', hint: 'List registered devices from Apple Developer' },
   { value: 'exit', label: 'Exit' },
 ] as const;
 
@@ -55,6 +57,10 @@ export async function runMenu(cwd: string = process.cwd()): Promise<void> {
       await handleAddTesters();
     } else if (choice === 'add_device') {
       await handleAddDevice();
+    } else if (choice === 'view_profiles') {
+      await handleViewProfiles(cwd);
+    } else if (choice === 'view_devices') {
+      await handleViewDevices();
     }
   }
 }
@@ -138,5 +144,61 @@ async function handleAddDevice(): Promise<void> {
     p.log.error('add_device failed. Make sure Apple credentials are configured.');
   } else {
     p.log.success('Device registered and match updated.');
+  }
+}
+
+async function handleViewProfiles(cwd: string): Promise<void> {
+  const configPath = resolve(cwd, 'rn-workflows.yml');
+  if (!existsSync(configPath)) {
+    p.log.error('rn-workflows.yml not found. Run Init project first.');
+    return;
+  }
+
+  const matchGitUrl = process.env['MATCH_GIT_URL'];
+  if (!matchGitUrl) {
+    p.log.error('MATCH_GIT_URL not set. Run Setup CI/CD → Match first.');
+    return;
+  }
+
+  p.log.step('Fetching profiles from match repo...');
+
+  // Extract owner/repo from git URL
+  const match = matchGitUrl.match(/github\.com[/:](.+?)(?:\.git)?$/);
+  if (!match) {
+    p.log.error(`Cannot parse GitHub repo from MATCH_GIT_URL: ${matchGitUrl}`);
+    return;
+  }
+
+  const repo = match[1];
+  const result = spawnSync('gh', ['api', `repos/${repo}/contents/profiles`, '--jq', '.[].name'], { encoding: 'utf8' });
+
+  if (result.status !== 0 || !result.stdout.trim()) {
+    p.log.warn('No profiles found or gh CLI not authenticated.');
+    return;
+  }
+
+  const types = result.stdout.trim().split('\n');
+  for (const type of types) {
+    const profiles = spawnSync('gh', ['api', `repos/${repo}/contents/profiles/${type}`, '--jq', '.[].name'], { encoding: 'utf8' });
+    if (profiles.stdout.trim()) {
+      p.log.info(`\n${type}:`);
+      for (const prof of profiles.stdout.trim().split('\n')) {
+        p.log.step(`  ${prof}`);
+      }
+    }
+  }
+  p.log.success('Done.');
+}
+
+async function handleViewDevices(): Promise<void> {
+  p.log.step('Fetching registered devices from Apple Developer...');
+  const result = spawnSync(
+    'bundle',
+    ['exec', 'fastlane', 'run', 'get_registered_devices'],
+    { encoding: 'utf8', stdio: 'inherit' },
+  );
+
+  if (result.status !== 0) {
+    p.log.error('Failed. Make sure Apple credentials are configured (APPLE_ID env var).');
   }
 }

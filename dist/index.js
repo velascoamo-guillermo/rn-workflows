@@ -2,6 +2,7 @@
 
 // src/index.ts
 import { defineCommand as defineCommand4, runMain } from "citty";
+import { createRequire } from "node:module";
 
 // src/commands/init.ts
 import { defineCommand } from "citty";
@@ -322,7 +323,11 @@ function generateFastlane(config, options = {}) {
     projectType: config.project.type,
     bundleId: config.project.bundleId,
     packageName: config.project.packageName,
-    packageManager
+    packageManager,
+    usesFirebase: allTargets.has("firebase"),
+    hasIos: iosProfiles.length > 0,
+    hasAndroidFirebase: androidProfiles.some((p2) => p2.targets.includes("firebase")),
+    hasIosFirebase: iosProfiles.some((p2) => p2.targets.includes("firebase"))
   });
   const appfile = renderTemplate("fastlane/Appfile.ejs", {
     bundleId: config.project.bundleId,
@@ -1036,17 +1041,210 @@ function assertNotCancelled2(value) {
   }
 }
 
+// src/commands/menu.ts
+import { existsSync as existsSync6 } from "node:fs";
+import { resolve as resolve4 } from "node:path";
+import * as p6 from "@clack/prompts";
+import { spawnSync as spawnSync2 } from "node:child_process";
+var MENU_CHOICES = [
+  { value: "init", label: "Init project", hint: "Create rn-workflows.yml" },
+  { value: "generate", label: "Generate files", hint: "Fastlane + CI from rn-workflows.yml" },
+  { value: "setup", label: "Setup CI/CD", hint: "Firebase, Match, Secrets" },
+  { value: "add_testers", label: "Add testers", hint: "Firebase App Distribution" },
+  { value: "remove_testers", label: "Remove testers", hint: "Firebase App Distribution" },
+  { value: "add_device", label: "Add device (iOS)", hint: "Register + regenerate match certs" },
+  { value: "remove_device", label: "Remove device (iOS)", hint: "Disable device in Apple Developer" },
+  { value: "view_profiles", label: "View profiles (iOS)", hint: "List provisioning profiles in match repo" },
+  { value: "view_devices", label: "View devices (iOS)", hint: "List registered devices from Apple Developer" },
+  { value: "exit", label: "Exit" }
+];
+var SETUP_CHOICES = [
+  { value: "firebase", label: "Firebase", hint: "Create apps + service account" },
+  { value: "match", label: "Match", hint: "Create certificates repo" },
+  { value: "secrets", label: "Secrets", hint: "Upload to GitHub/GitLab" },
+  { value: "all", label: "All", hint: "Run all setup steps" },
+  { value: "back", label: "Back" }
+];
+async function runMenu(cwd = process.cwd()) {
+  p6.intro("rn-workflows");
+  while (true) {
+    const choice = await p6.select({
+      message: "What do you want to do?",
+      options: MENU_CHOICES
+    });
+    if (typeof choice === "symbol" || choice === "exit") {
+      p6.outro("Bye!");
+      break;
+    }
+    if (choice === "init") {
+      const initRun = init_default.run;
+      if (initRun)
+        await initRun({ args: { cwd, force: false }, rawArgs: [], cmd: init_default });
+    } else if (choice === "generate") {
+      const generateRun = generate_default.run;
+      if (generateRun)
+        await generateRun({ args: { cwd, config: "rn-workflows.yml", "dry-run": false }, rawArgs: [], cmd: generate_default });
+    } else if (choice === "setup") {
+      await handleSetupMenu(cwd);
+    } else if (choice === "add_testers") {
+      await handleAddTesters();
+    } else if (choice === "remove_testers") {
+      await handleRemoveTesters();
+    } else if (choice === "add_device") {
+      await handleAddDevice();
+    } else if (choice === "remove_device") {
+      await handleRemoveDevice();
+    } else if (choice === "view_profiles") {
+      await handleViewProfiles(cwd);
+    } else if (choice === "view_devices") {
+      await handleViewDevices();
+    }
+  }
+}
+async function handleSetupMenu(cwd) {
+  const configPath = resolve4(cwd, "rn-workflows.yml");
+  if (!existsSync6(configPath)) {
+    p6.log.error("rn-workflows.yml not found. Run Init project first.");
+    return;
+  }
+  let config;
+  try {
+    config = loadConfig(configPath);
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      p6.log.error(err.message);
+      return;
+    }
+    throw err;
+  }
+  const choice = await p6.select({
+    message: "Setup — what do you want to configure?",
+    options: SETUP_CHOICES
+  });
+  if (typeof choice === "symbol" || choice === "back")
+    return;
+  const ctx = {
+    config,
+    dryRun: false,
+    collectedSecrets: {}
+  };
+  const stepsMap = {
+    firebase: [makeFirebaseAppsStep(), makeServiceAccountStep()],
+    match: [makeMatchRepoStep()],
+    secrets: [makeSecretsStep()],
+    all: [makeFirebaseAppsStep(), makeServiceAccountStep(), makeMatchRepoStep(), makeSecretsStep()]
+  };
+  const selectedSteps = stepsMap[choice];
+  if (!selectedSteps)
+    return;
+  try {
+    await runSteps(selectedSteps, ctx);
+    p6.log.success("Done!");
+  } catch (err) {
+    p6.log.error(err instanceof Error ? err.message : String(err));
+  }
+}
+async function handleAddTesters() {
+  const emails = await promptText("Tester emails (comma-separated)");
+  const group = await promptText("Group alias", { defaultValue: "internal-testers", placeholder: "internal-testers" });
+  p6.log.step("Running fastlane add_testers...");
+  const result = spawnSync2("bundle", ["exec", "fastlane", "add_testers", `emails:${emails}`, `group:${group}`], { encoding: "utf8", stdio: "inherit" });
+  if (result.status !== 0) {
+    p6.log.error("add_testers failed. Make sure Fastlane is installed and credentials are set.");
+  } else {
+    p6.log.success("Testers added successfully.");
+  }
+}
+async function handleAddDevice() {
+  const name = await promptText("Device name");
+  const udid = await promptText("Device UDID");
+  p6.log.step("Running fastlane ios add_device...");
+  const result = spawnSync2("bundle", ["exec", "fastlane", "ios", "add_device", `name:${name}`, `udid:${udid}`], { encoding: "utf8", stdio: "inherit" });
+  if (result.status !== 0) {
+    p6.log.error("add_device failed. Make sure Apple credentials are configured.");
+  } else {
+    p6.log.success("Device registered and match updated.");
+  }
+}
+async function handleRemoveTesters() {
+  const emails = await promptText("Tester emails to remove (comma-separated)");
+  p6.log.step("Running fastlane remove_testers...");
+  const result = spawnSync2("bundle", ["exec", "fastlane", "remove_testers", `emails:${emails}`], { encoding: "utf8", stdio: "inherit" });
+  if (result.status !== 0) {
+    p6.log.error("remove_testers failed.");
+  } else {
+    p6.log.success("Testers removed successfully.");
+  }
+}
+async function handleRemoveDevice() {
+  const udid = await promptText("Device UDID to disable");
+  p6.log.step("Running fastlane ios remove_device...");
+  const result = spawnSync2("bundle", ["exec", "fastlane", "ios", "remove_device", `udid:${udid}`], { encoding: "utf8", stdio: "inherit" });
+  if (result.status !== 0) {
+    p6.log.error("remove_device failed. Make sure Apple credentials are configured.");
+  }
+}
+async function handleViewProfiles(cwd) {
+  let matchGitUrl = process.env["MATCH_GIT_URL"];
+  if (!matchGitUrl) {
+    matchGitUrl = await promptText("Match repo URL (MATCH_GIT_URL)", { placeholder: "https://github.com/owner/match-repo.git" });
+  }
+  p6.log.step("Fetching profiles from match repo...");
+  const matchResult = matchGitUrl.match(/github\.com[/:](.+?)(?:\.git)?$/);
+  if (!matchResult) {
+    p6.log.error(`Cannot parse GitHub repo from URL: ${matchGitUrl}`);
+    return;
+  }
+  const repo = matchResult[1];
+  const result = spawnSync2("gh", ["api", `repos/${repo}/contents/profiles`, "--jq", ".[].name"], { encoding: "utf8" });
+  if (result.status !== 0 || !result.stdout.trim()) {
+    p6.log.warn("No profiles found or gh CLI not authenticated.");
+    return;
+  }
+  const types = result.stdout.trim().split(`
+`);
+  for (const type of types) {
+    const profiles = spawnSync2("gh", ["api", `repos/${repo}/contents/profiles/${type}`, "--jq", ".[].name"], { encoding: "utf8" });
+    if (profiles.stdout.trim()) {
+      p6.log.info(`${type}:`);
+      for (const prof of profiles.stdout.trim().split(`
+`)) {
+        p6.log.step(`  ${prof}`);
+      }
+    }
+  }
+  p6.log.success("Done.");
+}
+async function handleViewDevices() {
+  p6.log.step("Fetching registered devices from Apple Developer...");
+  const result = spawnSync2("bundle", ["exec", "fastlane", "ios", "list_devices"], { encoding: "utf8", stdio: "inherit" });
+  if (result.status !== 0) {
+    p6.log.error("Failed. Make sure APPLE_ID is set and Fastlane is installed.");
+  }
+}
+
 // src/index.ts
+var { version } = createRequire(import.meta.url)("../package.json");
 var main = defineCommand4({
   meta: {
     name: "rn-workflows",
-    version: "0.1.0",
+    version,
     description: "Open-source CLI to generate Fastlane + GitHub Actions + GitLab CI from a single YAML config for React Native / Expo projects."
+  },
+  args: {
+    cwd: {
+      type: "string",
+      description: "Working directory",
+      default: process.cwd()
+    }
   },
   subCommands: {
     init: init_default,
     generate: generate_default,
     setup: setup_default
+  },
+  async run({ args }) {
+    await runMenu(String(args.cwd));
   }
 });
 runMain(main);

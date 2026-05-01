@@ -146,7 +146,6 @@ platform :ios do
 
   lane :list_devices do
     require 'spaceship'
-    Spaceship::ConnectAPI.login
     devices = Spaceship::ConnectAPI::Device.all
     UI.message "\n📱 Registered devices (#{devices.count}):"
     devices.each do |d|
@@ -157,7 +156,6 @@ platform :ios do
   lane :remove_device do |options|
     udid = options[:udid] || UI.input("Device UDID to disable:")
     require 'spaceship'
-    Spaceship::ConnectAPI.login
     device = Spaceship::ConnectAPI::Device.all.find { |d| d.udid == udid }
     if device
       device.disable!

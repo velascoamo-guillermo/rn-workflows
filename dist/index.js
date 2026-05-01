@@ -71,9 +71,15 @@ var ProjectSchema = z.object({
   bundleId: z.string().min(1),
   packageName: z.string().min(1)
 });
+var ChecksSchema = z.object({
+  test: z.boolean().optional(),
+  lint: z.boolean().optional(),
+  typecheck: z.boolean().optional()
+});
 var ConfigSchema = z.object({
   project: ProjectSchema,
   ci: CiSchema,
+  checks: ChecksSchema.optional(),
   build: z.record(z.string().min(1), BuildProfileSchema)
 }).superRefine((cfg, ctx) => {
   const profiles = Object.entries(cfg.build);
@@ -203,6 +209,7 @@ var init_default = defineCommand({
     const config = {
       project: { type: projectType, bundleId, packageName },
       ci,
+      checks: { test: true, lint: true, typecheck: true },
       build
     };
     const header = "# rn-workflows config. Run `npx rn-workflows generate` after editing.\n";
@@ -418,11 +425,15 @@ function generateGithubActions(config, options = {}) {
       runsOn: platform === "ios" ? "macos-latest" : "ubuntu-latest",
       secrets: secretsFor(platform, profile.distribution)
     }));
+    const checks = config.checks ?? {};
+    const hasChecks = checks.test || checks.lint || checks.typecheck;
     const content = renderTemplate("github/workflow.ejs", {
       workflowName: `rn-workflows • ${name}`,
       branch: branchFor(name),
       jobs,
-      packageManager
+      packageManager,
+      checks,
+      hasChecks
     });
     files.push({ path: `.github/workflows/rn-${name}.yml`, content });
   }

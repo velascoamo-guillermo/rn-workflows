@@ -9,10 +9,53 @@ on:
     branches: [<%= branch %>]
 
 jobs:
+<% if (hasChecks) { -%>
+  quality:
+    name: Quality checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+<% if (packageManager !== 'bun') { -%>
+          cache: <%= packageManager %>
+<% } -%>
+
+<% if (packageManager === 'bun') { -%>
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+<% } -%>
+      - name: Install JS dependencies
+        run: <%= packageManager === 'bun' ? 'bun install --frozen-lockfile' : packageManager === 'npm' ? 'npm ci' : 'yarn install --frozen-lockfile' %>
+
+<% if (checks.lint) { -%>
+      - name: Lint
+        run: <%= packageManager === 'bun' ? 'bun expo lint' : packageManager === 'npm' ? 'npx expo lint' : 'yarn expo lint' %>
+
+<% } -%>
+<% if (checks.typecheck) { -%>
+      - name: Type check
+        run: <%= packageManager === 'bun' ? 'bun tsc --noEmit' : packageManager === 'npm' ? 'npx tsc --noEmit' : 'yarn tsc --noEmit' %>
+
+<% } -%>
+<% if (checks.test) { -%>
+      - name: Test
+        run: <%= packageManager === 'bun' ? 'bun test' : packageManager === 'npm' ? 'npm test' : 'yarn test' %>
+
+<% } -%>
+<% } -%>
 <% for (const job of jobs) { -%>
   <%= job.id %>:
     name: <%= job.name %>
     runs-on: <%= job.runsOn %>
+<% if (hasChecks) { -%>
+    needs: quality
+<% } -%>
     steps:
       - name: Checkout
         uses: actions/checkout@v4

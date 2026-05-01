@@ -31,11 +31,16 @@ export function generateGithubActions(
       secrets: secretsFor(platform, profile.distribution),
     }));
 
+    const checks = config.checks ?? {};
+    const hasChecks = checks.test || checks.lint || checks.typecheck;
+
     const content = renderTemplate('github/workflow.ejs', {
       workflowName: `rn-workflows • ${name}`,
       branch: branchFor(name),
       jobs,
       packageManager,
+      checks,
+      hasChecks,
     });
 
     files.push({ path: `.github/workflows/rn-${name}.yml`, content });

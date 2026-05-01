@@ -113,6 +113,7 @@ export default defineCommand({
     const config = {
       project: { type: projectType, bundleId, packageName },
       ci,
+      checks: { test: true, lint: true, typecheck: true },
       build,
     };
 

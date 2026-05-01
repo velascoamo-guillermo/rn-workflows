@@ -59,10 +59,19 @@ export const ProjectSchema = z.object({
   packageName: z.string().min(1),
 });
 
+export const ChecksSchema = z.object({
+  test: z.boolean().optional(),
+  lint: z.boolean().optional(),
+  typecheck: z.boolean().optional(),
+});
+
+export type Checks = z.infer<typeof ChecksSchema>;
+
 export const ConfigSchema = z
   .object({
     project: ProjectSchema,
     ci: CiSchema,
+    checks: ChecksSchema.optional(),
     build: z.record(z.string().min(1), BuildProfileSchema),
   })
   .superRefine((cfg, ctx) => {

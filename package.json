@@ -1,6 +1,6 @@
 {
   "name": "rn-workflows",
-  "version": "0.2.0-beta.8",
+  "version": "0.2.0-beta.9",
   "description": "Open-source CLI to generate Fastlane + GitHub Actions + GitLab CI from a single YAML config for React Native / Expo projects.",
   "type": "module",
   "bin": {

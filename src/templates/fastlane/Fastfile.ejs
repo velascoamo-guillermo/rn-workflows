@@ -141,6 +141,8 @@ platform :ios do
     name = options[:name] || UI.input("Device name:")
     udid = options[:udid] || UI.input("Device UDID:")
     register_devices(devices: { name => udid })
+    require 'spaceship'
+    Spaceship::ConnectAPI::Device.enable(udid)
     match(type: "adhoc", force_for_new_devices: true)
   end
 

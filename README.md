@@ -6,20 +6,6 @@ Open-source CLI alternative to EAS Workflows. Define build profiles in one YAML 
 
 EAS Workflows (Expo) is paid SaaS, tied to Expo, not self-hostable. `rn-workflows` is the open equivalent: works with bare React Native and Expo, supports multiple CI providers, emits plain Fastlane so you can debug and extend locally.
 
-## How it works
-
-```mermaid
-flowchart LR
-    A[rn-workflows.yml] --> B[Parser & Validator]
-    B --> C{Generators}
-    C --> D[Fastlane]
-    C --> E[GitHub Actions]
-    C --> F[GitLab CI]
-    D --> G["fastlane/Fastfile<br/>fastlane/Appfile<br/>Gemfile"]
-    E --> H[".github/workflows/<br/>rn-profile.yml"]
-    F --> I[.gitlab-ci.yml]
-```
-
 ## Install
 
 ```bash
@@ -104,28 +90,6 @@ Given `ci: github-actions`:
 Given `ci: gitlab`:
 - `fastlane/Fastfile`, `fastlane/Appfile`, `fastlane/Pluginfile`, `Gemfile`
 - `.gitlab-ci.yml` with one stage per profile × platform
-
-## Generated workflow
-
-Each build profile produces a GitHub Actions workflow with this job structure:
-
-```mermaid
-flowchart TD
-    A([push / workflow_dispatch]) --> B[Checkout]
-    B --> C[Setup Node]
-    C --> D[Setup Ruby]
-    D --> E{platform?}
-    E -->|android| F[Setup JDK]
-    E -->|ios| H
-    F --> H[Install JS deps]
-    H --> I["bundle exec fastlane<br/>platform lane"]
-    I --> J{distribution}
-    J -->|firebase| K[Firebase App Distribution]
-    J -->|testflight| L[TestFlight]
-    J -->|store| M[Play Store / App Store]
-    J -->|appcenter| N[App Center]
-    J -->|github-releases| O[GitHub Release]
-```
 
 ## Requirements
 

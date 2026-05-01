@@ -13,6 +13,7 @@ describe('menu choices', () => {
     expect(values).toContain('remove_device');
     expect(values).toContain('view_profiles');
     expect(values).toContain('view_devices');
+    expect(values).toContain('configure_apple_auth');
     expect(values).toContain('exit');
   });
 

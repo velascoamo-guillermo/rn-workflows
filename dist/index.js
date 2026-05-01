@@ -1,8 +1,26 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
+var __create = Object.create;
+var __getProtoOf = Object.getPrototypeOf;
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __toESM = (mod, isNodeMode, target) => {
+  target = mod != null ? __create(__getProtoOf(mod)) : {};
+  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  for (let key of __getOwnPropNames(mod))
+    if (!__hasOwnProp.call(to, key))
+      __defProp(to, key, {
+        get: () => mod[key],
+        enumerable: true
+      });
+  return to;
+};
+var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // src/index.ts
 import { defineCommand as defineCommand4, runMain } from "citty";
-import { createRequire } from "node:module";
+import { createRequire as createRequire2 } from "node:module";
 
 // src/commands/init.ts
 import { defineCommand } from "citty";
@@ -1056,6 +1074,7 @@ var MENU_CHOICES = [
   { value: "remove_device", label: "Remove device (iOS)", hint: "Disable device in Apple Developer" },
   { value: "view_profiles", label: "View profiles (iOS)", hint: "List provisioning profiles in match repo" },
   { value: "view_devices", label: "View devices (iOS)", hint: "List registered devices from Apple Developer" },
+  { value: "configure_apple_auth", label: "Configure Apple auth", hint: "ASC API Key (.p8) or Apple ID + password" },
   { value: "exit", label: "Exit" }
 ];
 var SETUP_CHOICES = [
@@ -1098,6 +1117,8 @@ async function runMenu(cwd = process.cwd()) {
       await handleViewProfiles(cwd);
     } else if (choice === "view_devices") {
       await handleViewDevices();
+    } else if (choice === "configure_apple_auth") {
+      await handleConfigureAppleAuth(cwd);
     }
   }
 }
@@ -1219,12 +1240,81 @@ async function handleViewDevices() {
   p6.log.step("Fetching registered devices from Apple Developer...");
   const result = spawnSync2("bundle", ["exec", "fastlane", "ios", "list_devices"], { encoding: "utf8", stdio: "inherit" });
   if (result.status !== 0) {
-    p6.log.error("Failed. Make sure APPLE_ID is set and Fastlane is installed.");
+    p6.log.error("Failed. Make sure Apple auth is configured (run Configure Apple auth).");
+  }
+}
+async function handleConfigureAppleAuth(cwd) {
+  const method = await p6.select({
+    message: "Apple authentication method",
+    options: [
+      { value: "asc", label: "ASC API Key (.p8)", hint: "Recommended — no password, no 2FA" },
+      { value: "appleid", label: "Apple ID + password", hint: "Requires 2FA on first use" }
+    ]
+  });
+  if (typeof method === "symbol")
+    return;
+  const envPath = resolve4(cwd, "fastlane", ".env");
+  let existing = "";
+  try {
+    existing = (await import("node:fs")).readFileSync(envPath, "utf8");
+  } catch {}
+  const { writeFileSync: writeFileSync3 } = await import("node:fs");
+  const { mkdirSync: mkdirSync2 } = await import("node:fs");
+  mkdirSync2(resolve4(cwd, "fastlane"), { recursive: true });
+  if (method === "asc") {
+    const keyId = await promptText("Key ID (from App Store Connect)");
+    const issuerId = await promptText("Issuer ID (from App Store Connect)");
+    const keyPath = await promptText("Path to .p8 file");
+    let keyContent;
+    try {
+      keyContent = (await import("node:fs")).readFileSync(keyPath, "utf8");
+    } catch {
+      p6.log.error(`Cannot read file: ${keyPath}`);
+      return;
+    }
+    const keyContentEscaped = keyContent.replace(/\n/g, "\\n");
+    const newVars = [
+      `ASC_KEY_ID=${keyId}`,
+      `ASC_ISSUER_ID=${issuerId}`,
+      `ASC_KEY_CONTENT="${keyContentEscaped}"`,
+      `ASC_KEY_IS_BASE64=false`
+    ];
+    const cleaned = existing.split(`
+`).filter((l) => !l.startsWith("ASC_") && !l.startsWith("FASTLANE_USER") && !l.startsWith("FASTLANE_PASSWORD")).join(`
+`).trim();
+    writeFileSync3(envPath, (cleaned ? cleaned + `
+` : "") + newVars.join(`
+`) + `
+`);
+    p6.log.success(`ASC API Key saved to fastlane/.env`);
+  } else {
+    const email = await promptText("Apple ID email");
+    const password4 = await (async () => {
+      const val = await p6.password({ message: "Apple ID password" });
+      if (typeof val === "symbol") {
+        p6.cancel("Cancelled.");
+        process.exit(0);
+      }
+      return val;
+    })();
+    const newVars = [
+      `FASTLANE_USER=${email}`,
+      `FASTLANE_PASSWORD=${password4}`
+    ];
+    const cleaned = existing.split(`
+`).filter((l) => !l.startsWith("ASC_") && !l.startsWith("FASTLANE_USER") && !l.startsWith("FASTLANE_PASSWORD")).join(`
+`).trim();
+    writeFileSync3(envPath, (cleaned ? cleaned + `
+` : "") + newVars.join(`
+`) + `
+`);
+    p6.log.success(`Apple ID saved to fastlane/.env`);
+    p6.log.warn("2FA required on first use — Fastlane will store session in Keychain.");
   }
 }
 
 // src/index.ts
-var { version } = createRequire(import.meta.url)("../package.json");
+var { version } = createRequire2(import.meta.url)("../package.json");
 var main = defineCommand4({
   meta: {
     name: "rn-workflows",

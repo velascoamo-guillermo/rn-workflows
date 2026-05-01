@@ -22,6 +22,7 @@ export const MENU_CHOICES = [
   { value: 'remove_device', label: 'Remove device (iOS)', hint: 'Disable device in Apple Developer' },
   { value: 'view_profiles', label: 'View profiles (iOS)', hint: 'List provisioning profiles in match repo' },
   { value: 'view_devices', label: 'View devices (iOS)', hint: 'List registered devices from Apple Developer' },
+  { value: 'configure_apple_auth', label: 'Configure Apple auth', hint: 'ASC API Key (.p8) or Apple ID + password' },
   { value: 'exit', label: 'Exit' },
 ] as const;
 
@@ -67,6 +68,8 @@ export async function runMenu(cwd: string = process.cwd()): Promise<void> {
       await handleViewProfiles(cwd);
     } else if (choice === 'view_devices') {
       await handleViewDevices();
+    } else if (choice === 'configure_apple_auth') {
+      await handleConfigureAppleAuth(cwd);
     }
   }
 }
@@ -229,6 +232,83 @@ async function handleViewDevices(): Promise<void> {
   );
 
   if (result.status !== 0) {
-    p.log.error('Failed. Make sure APPLE_ID is set and Fastlane is installed.');
+    p.log.error('Failed. Make sure Apple auth is configured (run Configure Apple auth).');
+  }
+}
+
+async function handleConfigureAppleAuth(cwd: string): Promise<void> {
+  const method = await p.select({
+    message: 'Apple authentication method',
+    options: [
+      { value: 'asc', label: 'ASC API Key (.p8)', hint: 'Recommended — no password, no 2FA' },
+      { value: 'appleid', label: 'Apple ID + password', hint: 'Requires 2FA on first use' },
+    ],
+  });
+
+  if (typeof method === 'symbol') return;
+
+  const envPath = resolve(cwd, 'fastlane', '.env');
+  let existing = '';
+  try {
+    existing = (await import('node:fs')).readFileSync(envPath, 'utf8');
+  } catch { /* file may not exist yet */ }
+
+  const { writeFileSync } = await import('node:fs');
+  const { mkdirSync } = await import('node:fs');
+  mkdirSync(resolve(cwd, 'fastlane'), { recursive: true });
+
+  if (method === 'asc') {
+    const keyId = await promptText('Key ID (from App Store Connect)');
+    const issuerId = await promptText('Issuer ID (from App Store Connect)');
+    const keyPath = await promptText('Path to .p8 file');
+
+    let keyContent: string;
+    try {
+      keyContent = (await import('node:fs')).readFileSync(keyPath, 'utf8');
+    } catch {
+      p.log.error(`Cannot read file: ${keyPath}`);
+      return;
+    }
+
+    const keyContentEscaped = keyContent.replace(/\n/g, '\\n');
+
+    const newVars = [
+      `ASC_KEY_ID=${keyId}`,
+      `ASC_ISSUER_ID=${issuerId}`,
+      `ASC_KEY_CONTENT="${keyContentEscaped}"`,
+      `ASC_KEY_IS_BASE64=false`,
+    ];
+
+    const cleaned = existing
+      .split('\n')
+      .filter(l => !l.startsWith('ASC_') && !l.startsWith('FASTLANE_USER') && !l.startsWith('FASTLANE_PASSWORD'))
+      .join('\n')
+      .trim();
+
+    writeFileSync(envPath, (cleaned ? cleaned + '\n' : '') + newVars.join('\n') + '\n');
+    p.log.success(`ASC API Key saved to fastlane/.env`);
+
+  } else {
+    const email = await promptText('Apple ID email');
+    const password = await (async () => {
+      const val = await p.password({ message: 'Apple ID password' });
+      if (typeof val === 'symbol') { p.cancel('Cancelled.'); process.exit(0); }
+      return val;
+    })();
+
+    const newVars = [
+      `FASTLANE_USER=${email}`,
+      `FASTLANE_PASSWORD=${password}`,
+    ];
+
+    const cleaned = existing
+      .split('\n')
+      .filter(l => !l.startsWith('ASC_') && !l.startsWith('FASTLANE_USER') && !l.startsWith('FASTLANE_PASSWORD'))
+      .join('\n')
+      .trim();
+
+    writeFileSync(envPath, (cleaned ? cleaned + '\n' : '') + newVars.join('\n') + '\n');
+    p.log.success(`Apple ID saved to fastlane/.env`);
+    p.log.warn('2FA required on first use — Fastlane will store session in Keychain.');
   }
 }

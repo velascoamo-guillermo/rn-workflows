@@ -100,7 +100,6 @@ export function generateFastlane(
 
   const pluginfile = renderTemplate('fastlane/Pluginfile.ejs', {
     usesFirebase: allTargets.has('firebase'),
-    usesAppCenter: allTargets.has('appcenter'),
   });
 
   return [

@@ -4,7 +4,6 @@ export const PLATFORMS = ['android', 'ios', 'all'] as const;
 export const DISTRIBUTIONS = [
   'firebase',
   'testflight',
-  'appcenter',
   'github-releases',
   'store',
 ] as const;

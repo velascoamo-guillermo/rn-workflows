@@ -35,7 +35,6 @@ var PLATFORMS = ["android", "ios", "all"];
 var DISTRIBUTIONS = [
   "firebase",
   "testflight",
-  "appcenter",
   "github-releases",
   "store"
 ];
@@ -353,8 +352,7 @@ function generateFastlane(config, options = {}) {
   });
   const gemfile = renderTemplate("fastlane/Gemfile.ejs", {});
   const pluginfile = renderTemplate("fastlane/Pluginfile.ejs", {
-    usesFirebase: allTargets.has("firebase"),
-    usesAppCenter: allTargets.has("appcenter")
+    usesFirebase: allTargets.has("firebase")
   });
   return [
     { path: "fastlane/Fastfile", content: fastfile },
@@ -368,14 +366,12 @@ function generateFastlane(config, options = {}) {
 var ANDROID_SECRETS = {
   firebase: ["FIREBASE_APP_ID_ANDROID", "FIREBASE_SERVICE_ACCOUNT_JSON"],
   testflight: [],
-  appcenter: ["APPCENTER_API_TOKEN", "APPCENTER_OWNER_NAME", "APPCENTER_APP_NAME_ANDROID"],
   "github-releases": ["GITHUB_TOKEN"],
   store: ["PLAY_STORE_JSON_KEY"]
 };
 var IOS_SECRETS = {
   firebase: ["FIREBASE_APP_ID_IOS", "FIREBASE_SERVICE_ACCOUNT_JSON"],
   testflight: ["APP_STORE_CONNECT_API_KEY_PATH", "APPLE_TEAM_ID"],
-  appcenter: ["APPCENTER_API_TOKEN", "APPCENTER_OWNER_NAME", "APPCENTER_APP_NAME_IOS"],
   "github-releases": ["GITHUB_TOKEN"],
   store: ["APP_STORE_CONNECT_API_KEY_PATH", "APPLE_TEAM_ID"]
 };
@@ -844,33 +840,6 @@ async function setGitlabVariable(projectId, token, key, value) {
   return res.ok;
 }
 
-// src/setup/appcenter.ts
-function makeAppCenterStep() {
-  return {
-    id: "appcenter",
-    label: "Configure AppCenter",
-    async run(ctx) {
-      const usesAppCenter = Object.values(ctx.config.build).some((pr) => pr.distribution.includes("appcenter"));
-      if (!usesAppCenter)
-        return { skipped: true, note: "not used" };
-      if (ctx.collectedSecrets["APPCENTER_API_TOKEN"]) {
-        return { skipped: true, note: "already collected" };
-      }
-      const token = await promptText("AppCenter API token");
-      const owner = await promptText("AppCenter owner name");
-      const hasAndroid = Object.values(ctx.config.build).some((pr) => pr.distribution.includes("appcenter") && (pr.platform === "android" || pr.platform === "all"));
-      const hasIos = Object.values(ctx.config.build).some((pr) => pr.distribution.includes("appcenter") && (pr.platform === "ios" || pr.platform === "all"));
-      ctx.collectedSecrets["APPCENTER_API_TOKEN"] = token;
-      ctx.collectedSecrets["APPCENTER_OWNER_NAME"] = owner;
-      if (hasAndroid)
-        ctx.collectedSecrets["APPCENTER_APP_NAME_ANDROID"] = await promptText("AppCenter Android app name");
-      if (hasIos)
-        ctx.collectedSecrets["APPCENTER_APP_NAME_IOS"] = await promptText("AppCenter iOS app name");
-      return { skipped: false };
-    }
-  };
-}
-
 // src/setup/appstore.ts
 import { existsSync as existsSync3, readFileSync as readFileSync4 } from "node:fs";
 function makeAppStoreStep() {
@@ -1017,7 +986,6 @@ var setup_default = defineCommand3({
       makeFirebaseAppsStep(),
       makeServiceAccountStep(),
       makeMatchRepoStep(),
-      makeAppCenterStep(),
       makeAppStoreStep(),
       makePlayStoreStep(),
       makeSecretsStep()

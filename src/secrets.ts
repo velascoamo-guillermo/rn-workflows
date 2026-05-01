@@ -3,7 +3,6 @@ import type { Distribution, Platform } from './config/schema.ts';
 const ANDROID_SECRETS: Record<Distribution, string[]> = {
   firebase: ['FIREBASE_APP_ID_ANDROID', 'FIREBASE_SERVICE_ACCOUNT_JSON'],
   testflight: [],
-  appcenter: ['APPCENTER_API_TOKEN', 'APPCENTER_OWNER_NAME', 'APPCENTER_APP_NAME_ANDROID'],
   'github-releases': ['GITHUB_TOKEN'],
   store: ['PLAY_STORE_JSON_KEY'],
 };
@@ -11,7 +10,6 @@ const ANDROID_SECRETS: Record<Distribution, string[]> = {
 const IOS_SECRETS: Record<Distribution, string[]> = {
   firebase: ['FIREBASE_APP_ID_IOS', 'FIREBASE_SERVICE_ACCOUNT_JSON'],
   testflight: ['APP_STORE_CONNECT_API_KEY_PATH', 'APPLE_TEAM_ID'],
-  appcenter: ['APPCENTER_API_TOKEN', 'APPCENTER_OWNER_NAME', 'APPCENTER_APP_NAME_IOS'],
   'github-releases': ['GITHUB_TOKEN'],
   store: ['APP_STORE_CONNECT_API_KEY_PATH', 'APPLE_TEAM_ID'],
 };

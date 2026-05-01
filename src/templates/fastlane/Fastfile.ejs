@@ -33,15 +33,6 @@ platform :android do
       <%= profile.isAab ? 'android_artifact_path' : 'apk_path' %>: "<%= profile.androidArtifactPath %>"
     )
 <% } -%>
-<% if (profile.targets.includes('appcenter')) { -%>
-    appcenter_upload(
-      api_token: ENV["APPCENTER_API_TOKEN"],
-      owner_name: ENV["APPCENTER_OWNER_NAME"],
-      app_name: ENV["APPCENTER_APP_NAME_ANDROID"],
-      file: "<%= profile.androidArtifactPath %>",
-      destinations: "Testers"
-    )
-<% } -%>
 <% if (profile.targets.includes('store')) { -%>
     upload_to_play_store(
       json_key_data: ENV["PLAY_STORE_JSON_KEY"],
@@ -85,14 +76,6 @@ platform :ios do
     upload_to_testflight(
       api_key_path: ENV["APP_STORE_CONNECT_API_KEY_PATH"],
       skip_waiting_for_build_processing: true
-    )
-<% } -%>
-<% if (profile.targets.includes('appcenter')) { -%>
-    appcenter_upload(
-      api_token: ENV["APPCENTER_API_TOKEN"],
-      owner_name: ENV["APPCENTER_OWNER_NAME"],
-      app_name: ENV["APPCENTER_APP_NAME_IOS"],
-      destinations: "Testers"
     )
 <% } -%>
 <% if (profile.targets.includes('store')) { -%>

@@ -8,7 +8,6 @@ import { runSteps } from '../setup/runner.ts';
 import { makeFirebaseAppsStep, makeServiceAccountStep } from '../setup/firebase.ts';
 import { makeMatchRepoStep } from '../setup/match.ts';
 import { makeSecretsStep } from '../setup/secrets.ts';
-import { makeAppCenterStep } from '../setup/appcenter.ts';
 import { makeAppStoreStep } from '../setup/appstore.ts';
 import { makePlayStoreStep } from '../setup/playstore.ts';
 import type { SetupContext } from '../setup/types.ts';
@@ -119,7 +118,6 @@ export default defineCommand({
       makeFirebaseAppsStep(),
       makeServiceAccountStep(),
       makeMatchRepoStep(),
-      makeAppCenterStep(),
       makeAppStoreStep(),
       makePlayStoreStep(),
       makeSecretsStep(),

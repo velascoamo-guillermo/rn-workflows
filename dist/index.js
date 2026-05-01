@@ -1072,6 +1072,7 @@ var MENU_CHOICES = [
   { value: "remove_testers", label: "Remove testers", hint: "Firebase App Distribution" },
   { value: "add_device", label: "Add device (iOS)", hint: "Register + regenerate match certs" },
   { value: "remove_device", label: "Remove device (iOS)", hint: "Disable device in Apple Developer" },
+  { value: "regenerate_certs", label: "Regenerate certs (iOS)", hint: "Force new match certs + profiles" },
   { value: "view_profiles", label: "View profiles (iOS)", hint: "List provisioning profiles in match repo" },
   { value: "view_devices", label: "View devices (iOS)", hint: "List registered devices from Apple Developer" },
   { value: "configure_apple_auth", label: "Configure Apple auth", hint: "ASC API Key (.p8) or Apple ID + password" },
@@ -1117,6 +1118,8 @@ async function runMenu(cwd = process.cwd()) {
       await handleViewProfiles(cwd);
     } else if (choice === "view_devices") {
       await handleViewDevices();
+    } else if (choice === "regenerate_certs") {
+      await handleRegenCerts();
     } else if (choice === "configure_apple_auth") {
       await handleConfigureAppleAuth(cwd);
     }
@@ -1149,6 +1152,16 @@ async function handleSetupMenu(cwd) {
     dryRun: false,
     collectedSecrets: {}
   };
+  const needsMatch = (choice === "match" || choice === "all") && Object.values(config.build).some((p7) => p7.platform === "ios" || p7.platform === "all");
+  if (needsMatch) {
+    const defaultName = `${config.project.bundleId.split(".").pop()}-match`;
+    ctx.matchRepoName = await promptText("Match repo name", { defaultValue: defaultName, placeholder: defaultName });
+    ctx.githubRepo = config.ci === "github-actions" ? await promptText("GitHub repo (owner/repo)", { placeholder: "owner/repo" }) : undefined;
+  }
+  const needsSecrets = choice === "secrets" || choice === "all";
+  if (needsSecrets && !ctx.githubRepo && config.ci === "github-actions") {
+    ctx.githubRepo = await promptText("GitHub repo (owner/repo)", { placeholder: "owner/repo" });
+  }
   const stepsMap = {
     firebase: [makeFirebaseAppsStep(), makeServiceAccountStep()],
     match: [makeMatchRepoStep()],
@@ -1241,6 +1254,15 @@ async function handleViewDevices() {
   const result = spawnSync2("bundle", ["exec", "fastlane", "ios", "list_devices"], { encoding: "utf8", stdio: "inherit" });
   if (result.status !== 0) {
     p6.log.error("Failed. Make sure Apple auth is configured (run Configure Apple auth).");
+  }
+}
+async function handleRegenCerts() {
+  p6.log.step("Regenerating certs and profiles via match...");
+  const result = spawnSync2("bundle", ["exec", "fastlane", "ios", "regenerate_certs"], { encoding: "utf8", stdio: "inherit" });
+  if (result.status !== 0) {
+    p6.log.error("regenerate_certs failed. Make sure MATCH_GIT_URL and MATCH_PASSWORD are set.");
+  } else {
+    p6.log.success("Certs regenerated successfully.");
   }
 }
 async function handleConfigureAppleAuth(cwd) {

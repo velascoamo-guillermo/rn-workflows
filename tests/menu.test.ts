@@ -11,6 +11,7 @@ describe('menu choices', () => {
     expect(values).toContain('remove_testers');
     expect(values).toContain('add_device');
     expect(values).toContain('remove_device');
+    expect(values).toContain('regenerate_certs');
     expect(values).toContain('view_profiles');
     expect(values).toContain('view_devices');
     expect(values).toContain('configure_apple_auth');

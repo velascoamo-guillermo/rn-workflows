@@ -153,6 +153,10 @@ platform :ios do
     end
   end
 
+  lane :regenerate_certs do
+    match(type: "adhoc", force: true)
+  end
+
   lane :remove_device do |options|
     udid = options[:udid] || UI.input("Device UDID to disable:")
     require 'spaceship'

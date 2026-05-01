@@ -110,14 +110,16 @@ async function handleSetupMenu(cwd: string): Promise<void> {
   if (needsMatch) {
     const defaultName = `${config.project.bundleId.split('.').pop()}-match`;
     ctx.matchRepoName = await promptText('Match repo name', { defaultValue: defaultName, placeholder: defaultName });
-    ctx.githubRepo = config.ci === 'github-actions'
-      ? await promptText('GitHub repo (owner/repo)', { placeholder: 'owner/repo' })
-      : undefined;
+    if (config.ci === 'github-actions') {
+      const raw = await promptText('GitHub repo (owner/repo)', { placeholder: 'owner/repo' });
+      ctx.githubRepo = raw.replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
+    }
   }
 
   const needsSecrets = (choice === 'secrets' || choice === 'all');
   if (needsSecrets && !ctx.githubRepo && config.ci === 'github-actions') {
-    ctx.githubRepo = await promptText('GitHub repo (owner/repo)', { placeholder: 'owner/repo' });
+    const raw = await promptText('GitHub repo (owner/repo)', { placeholder: 'owner/repo' });
+    ctx.githubRepo = raw.replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
   }
 
   const stepsMap = {

@@ -732,7 +732,7 @@ function makeMatchRepoStep() {
       const hasIos = Object.values(ctx.config.build).some((p5) => p5.platform === "ios" || p5.platform === "all");
       if (!hasIos)
         return { skipped: true, note: "no iOS builds" };
-      const repoName = ctx.matchRepoName;
+      const repoName = ctx.matchRepoName.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "");
       if (ctx.config.ci === "github-actions") {
         if (!isAvailable("gh"))
           throw new Error("gh CLI not found. Install from https://cli.github.com");
@@ -1156,11 +1156,15 @@ async function handleSetupMenu(cwd) {
   if (needsMatch) {
     const defaultName = `${config.project.bundleId.split(".").pop()}-match`;
     ctx.matchRepoName = await promptText("Match repo name", { defaultValue: defaultName, placeholder: defaultName });
-    ctx.githubRepo = config.ci === "github-actions" ? await promptText("GitHub repo (owner/repo)", { placeholder: "owner/repo" }) : undefined;
+    if (config.ci === "github-actions") {
+      const raw = await promptText("GitHub repo (owner/repo)", { placeholder: "owner/repo" });
+      ctx.githubRepo = raw.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "");
+    }
   }
   const needsSecrets = choice === "secrets" || choice === "all";
   if (needsSecrets && !ctx.githubRepo && config.ci === "github-actions") {
-    ctx.githubRepo = await promptText("GitHub repo (owner/repo)", { placeholder: "owner/repo" });
+    const raw = await promptText("GitHub repo (owner/repo)", { placeholder: "owner/repo" });
+    ctx.githubRepo = raw.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "");
   }
   const stepsMap = {
     firebase: [makeFirebaseAppsStep(), makeServiceAccountStep()],

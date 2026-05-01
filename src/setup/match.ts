@@ -12,7 +12,7 @@ export function makeMatchRepoStep() {
       );
       if (!hasIos) return { skipped: true, note: 'no iOS builds' };
 
-      const repoName = ctx.matchRepoName!;
+      const repoName = ctx.matchRepoName!.replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
 
       if (ctx.config.ci === 'github-actions') {
         if (!isAvailable('gh')) throw new Error('gh CLI not found. Install from https://cli.github.com');

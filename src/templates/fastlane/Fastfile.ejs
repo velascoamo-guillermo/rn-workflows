@@ -158,7 +158,7 @@ platform :ios do
     require 'spaceship'
     device = Spaceship::ConnectAPI::Device.all.find { |d| d.udid == udid }
     if device
-      device.disable!
+      device.update(status: "DISABLED")
       UI.success("Disabled #{device.name} (#{udid})")
     else
       UI.error("Device with UDID #{udid} not found")

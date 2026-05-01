@@ -105,13 +105,6 @@ bun run build   # compile to dist/
 
 Tests live in `tests/`. Snapshots in `tests/__snapshots__/` are committed — update with `bun test --update-snapshots` after intentional template changes.
 
-## Roadmap
-
-- `build --profile` local exec
-- App Center / GitHub Releases distribution
-- OTA deploy step (integration with [xavia-ota](https://github.com/xaviadao/xavia-ota))
-- Diff mode to show what would change in existing CI files
-
 ## License
 
 MIT

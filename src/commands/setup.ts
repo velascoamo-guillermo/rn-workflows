@@ -12,7 +12,7 @@ import { makeAppStoreStep } from '../setup/appstore.ts';
 import { makePlayStoreStep } from '../setup/playstore.ts';
 import type { SetupContext } from '../setup/types.ts';
 import { isAvailable, shell } from '../setup/shell.ts';
-import { promptText, promptPassword } from '../setup/prompts.ts';
+import { promptText } from '../setup/prompts.ts';
 
 export default defineCommand({
   meta: {
@@ -67,13 +67,13 @@ export default defineCommand({
     }
 
     if (config.ci === 'gitlab') {
-      const rawProjectId = await p.text({ message: 'GitLab project ID or path', validate: v => (v?.trim() ? undefined : 'Required') });
+      if (!isAvailable('glab')) {
+        p.log.error('glab CLI not found. Install from https://gitlab.com/gitlab-org/cli');
+        process.exit(1);
+      }
+      const rawProjectId = await p.text({ message: 'GitLab project path (namespace/repo)', validate: v => (v?.trim() ? undefined : 'Required') });
       assertNotCancelled(rawProjectId);
       ctx.gitlabProjectId = String(rawProjectId);
-
-      const rawToken = await p.text({ message: 'GitLab personal access token', validate: v => (v?.trim() ? undefined : 'Required') });
-      assertNotCancelled(rawToken);
-      ctx.gitlabToken = String(rawToken);
     }
 
     const usesFirebase = Object.values(config.build).some(pr => pr.distribution.includes('firebase'));

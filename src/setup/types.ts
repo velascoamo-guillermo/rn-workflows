@@ -5,7 +5,6 @@ export interface SetupContext {
   dryRun: boolean;
   githubRepo?: string;
   gitlabProjectId?: string;
-  gitlabToken?: string;
   firebaseProjectId?: string;
   matchRepoName?: string;
   collectedSecrets: Record<string, string>;
@@ -19,5 +18,5 @@ export interface StepResult {
 export interface Step {
   id: string;
   label: string;
-  run: (ctx: SetupContext) => Promise<StepResult>;
+  run: (ctx: SetupContext) => StepResult | Promise<StepResult>;
 }

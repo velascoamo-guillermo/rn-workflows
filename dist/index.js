@@ -735,11 +735,11 @@ function makeMatchRepoStep() {
   return {
     id: "match-repo",
     label: "Create match certificates repo",
-    async run(ctx) {
+    run(ctx) {
       const hasIos = Object.values(ctx.config.build).some((p5) => p5.platform === "ios" || p5.platform === "all");
       if (!hasIos)
         return { skipped: true, note: "no iOS builds" };
-      const repoName = ctx.matchRepoName.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "");
+      const repoName = ctx.matchRepoName.replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "");
       if (ctx.config.ci === "github-actions") {
         if (!isAvailable("gh"))
           throw new Error("gh CLI not found. Install from https://cli.github.com");
@@ -758,24 +758,19 @@ function makeMatchRepoStep() {
         return { skipped: false, note: fullName };
       }
       if (ctx.config.ci === "gitlab") {
-        const checkUrl = `https://gitlab.com/api/v4/projects/${encodeURIComponent(repoName)}`;
-        const checkRes = await fetch(checkUrl, {
-          headers: { "PRIVATE-TOKEN": ctx.gitlabToken }
-        });
-        if (checkRes.ok) {
-          const existing = await checkRes.json();
-          ctx.collectedSecrets["MATCH_GIT_URL"] = existing.http_url_to_repo;
+        if (!isAvailable("glab"))
+          throw new Error("glab CLI not found. Install from https://gitlab.com/gitlab-org/cli");
+        const check = shell("glab", ["repo", "view", repoName]);
+        if (check.exitCode === 0) {
+          const urlLine = check.stdout.split(`
+`).find((l) => l.includes("http"));
+          ctx.collectedSecrets["MATCH_GIT_URL"] = urlLine?.trim() ?? `https://gitlab.com/${repoName}.git`;
           return { skipped: true, note: "repo already exists" };
         }
-        const res = await fetch("https://gitlab.com/api/v4/projects", {
-          method: "POST",
-          headers: { "PRIVATE-TOKEN": ctx.gitlabToken, "Content-Type": "application/json" },
-          body: JSON.stringify({ name: repoName, visibility: "private" })
-        });
-        if (!res.ok)
-          throw new Error(`GitLab project create failed: ${await res.text()}`);
-        const data = await res.json();
-        ctx.collectedSecrets["MATCH_GIT_URL"] = data.http_url_to_repo;
+        const r = shell("glab", ["repo", "create", repoName, "--private", "--description", "Fastlane Match certificates", "--defaultBranch", "main"]);
+        if (r.exitCode !== 0)
+          throw new Error(`glab repo create failed: ${r.stderr}`);
+        ctx.collectedSecrets["MATCH_GIT_URL"] = `https://gitlab.com/${repoName}.git`;
         return { skipped: false, note: repoName };
       }
       throw new Error(`Unsupported CI: ${ctx.config.ci}`);
@@ -822,13 +817,20 @@ function makeSecretsStep() {
         return { skipped: uploaded === 0, note: uploaded > 0 ? `${uploaded} secrets uploaded` : "all already set" };
       }
       if (ctx.config.ci === "gitlab") {
+        if (!isAvailable("glab")) {
+          throw new Error("glab CLI not found. Install from https://gitlab.com/gitlab-org/cli");
+        }
+        const existing = getExistingGitlabVariables(ctx.gitlabProjectId);
         let uploaded = 0;
         for (const [key, value] of Object.entries(ctx.collectedSecrets)) {
-          const res = await setGitlabVariable(ctx.gitlabProjectId, ctx.gitlabToken, key, value);
-          if (res)
-            uploaded++;
+          if (existing.has(key))
+            continue;
+          const result = shell("glab", ["variable", "set", key, "--value", value, "--repo", ctx.gitlabProjectId]);
+          if (result.exitCode !== 0)
+            throw new Error(`glab variable set ${key} failed: ${result.stderr}`);
+          uploaded++;
         }
-        return { skipped: uploaded === 0, note: `${uploaded} secrets uploaded` };
+        return { skipped: uploaded === 0, note: uploaded > 0 ? `${uploaded} secrets uploaded` : "all already set" };
       }
       throw new Error(`Unsupported CI: ${ctx.config.ci}`);
     }
@@ -841,14 +843,12 @@ function getExistingGithubSecrets(repo) {
   return new Set(result.stdout.trim().split(`
 `).filter(Boolean));
 }
-async function setGitlabVariable(projectId, token, key, value) {
-  const url = `https://gitlab.com/api/v4/projects/${encodeURIComponent(projectId)}/variables`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "PRIVATE-TOKEN": token, "Content-Type": "application/json" },
-    body: JSON.stringify({ key, value, protected: false, masked: false })
-  });
-  return res.ok;
+function getExistingGitlabVariables(projectId) {
+  const result = shell("glab", ["variable", "list", "--repo", projectId, "--output", "json"]);
+  if (result.exitCode !== 0)
+    return new Set;
+  const vars = JSON.parse(result.stdout || "[]");
+  return new Set(vars.map((v) => v.key));
 }
 
 // src/setup/appstore.ts
@@ -955,12 +955,13 @@ var setup_default = defineCommand3({
       }
     }
     if (config.ci === "gitlab") {
-      const rawProjectId = await p5.text({ message: "GitLab project ID or path", validate: (v) => v?.trim() ? undefined : "Required" });
+      if (!isAvailable("glab")) {
+        p5.log.error("glab CLI not found. Install from https://gitlab.com/gitlab-org/cli");
+        process.exit(1);
+      }
+      const rawProjectId = await p5.text({ message: "GitLab project path (namespace/repo)", validate: (v) => v?.trim() ? undefined : "Required" });
       assertNotCancelled2(rawProjectId);
       ctx.gitlabProjectId = String(rawProjectId);
-      const rawToken = await p5.text({ message: "GitLab personal access token", validate: (v) => v?.trim() ? undefined : "Required" });
-      assertNotCancelled2(rawToken);
-      ctx.gitlabToken = String(rawToken);
     }
     const usesFirebase = Object.values(config.build).some((pr) => pr.distribution.includes("firebase"));
     if (usesFirebase) {

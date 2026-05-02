@@ -42,12 +42,18 @@ export function makeSecretsStep() {
       }
 
       if (ctx.config.ci === 'gitlab') {
+        if (!isAvailable('glab')) {
+          throw new Error('glab CLI not found. Install from https://gitlab.com/gitlab-org/cli');
+        }
+        const existing = getExistingGitlabVariables(ctx.gitlabProjectId!);
         let uploaded = 0;
         for (const [key, value] of Object.entries(ctx.collectedSecrets)) {
-          const res = await setGitlabVariable(ctx.gitlabProjectId!, ctx.gitlabToken!, key, value);
-          if (res) uploaded++;
+          if (existing.has(key)) continue;
+          const result = shell('glab', ['variable', 'set', key, '--value', value, '--repo', ctx.gitlabProjectId!]);
+          if (result.exitCode !== 0) throw new Error(`glab variable set ${key} failed: ${result.stderr}`);
+          uploaded++;
         }
-        return { skipped: uploaded === 0, note: `${uploaded} secrets uploaded` };
+        return { skipped: uploaded === 0, note: uploaded > 0 ? `${uploaded} secrets uploaded` : 'all already set' };
       }
 
       throw new Error(`Unsupported CI: ${ctx.config.ci}`);
@@ -61,12 +67,10 @@ function getExistingGithubSecrets(repo: string): Set<string> {
   return new Set(result.stdout.trim().split('\n').filter(Boolean));
 }
 
-async function setGitlabVariable(projectId: string, token: string, key: string, value: string): Promise<boolean> {
-  const url = `https://gitlab.com/api/v4/projects/${encodeURIComponent(projectId)}/variables`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'PRIVATE-TOKEN': token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key, value, protected: false, masked: false }),
-  });
-  return res.ok;
+function getExistingGitlabVariables(projectId: string): Set<string> {
+  const result = shell('glab', ['variable', 'list', '--repo', projectId, '--output', 'json']);
+  if (result.exitCode !== 0) return new Set();
+  type GlVar = { key: string };
+  const vars: GlVar[] = JSON.parse(result.stdout || '[]');
+  return new Set(vars.map(v => v.key));
 }

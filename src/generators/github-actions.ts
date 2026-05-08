@@ -34,13 +34,22 @@ export function generateGithubActions(
     const checks = config.checks ?? {};
     const hasChecks = checks.test || checks.lint || checks.typecheck;
 
-    const content = renderTemplate('github/workflow.ejs', {
+    const templateData = {
       workflowName: `rn-workflows • ${name}`,
       branch: branchFor(name),
       jobs,
       packageManager,
       checks,
       hasChecks,
+    };
+
+    const templateName = profile.ota
+      ? 'github/workflow-smart.ejs'
+      : 'github/workflow.ejs';
+
+    const content = renderTemplate(templateName, {
+      ...templateData,
+      ...(profile.ota ? { ota: profile.ota } : {}),
     });
 
     files.push({ path: `.github/workflows/rn-${name}.yml`, content });

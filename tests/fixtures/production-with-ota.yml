@@ -1,0 +1,18 @@
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+
+ci: github-actions
+
+build:
+  production:
+    platform: all
+    distribution: store
+    android:
+      buildType: aab
+    ios:
+      exportMethod: app-store
+    ota:
+      server: https://ota.myapp.com
+      channel: production

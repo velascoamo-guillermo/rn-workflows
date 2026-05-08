@@ -44,11 +44,19 @@ export const IosBuildOptionsSchema = z.object({
   exportMethod: z.enum(['app-store', 'ad-hoc', 'development']).optional(),
 });
 
+export const OtaConfigSchema = z.object({
+  server: z.string().min(1),
+  channel: z.string().min(1),
+});
+
+export type OtaConfig = z.infer<typeof OtaConfigSchema>;
+
 export const BuildProfileSchema = z.object({
   platform: PlatformSchema,
   distribution: DistributionStringSchema,
   android: AndroidBuildOptionsSchema.optional(),
   ios: IosBuildOptionsSchema.optional(),
+  ota: OtaConfigSchema.optional(),
 });
 
 export type BuildProfile = z.infer<typeof BuildProfileSchema>;

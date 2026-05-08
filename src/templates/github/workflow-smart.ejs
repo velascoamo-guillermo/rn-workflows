@@ -127,7 +127,7 @@ jobs:
         run: |
           curl -X POST <%= ota.server %>/api/upload \
             -F "file=@bundle.zip" \
-            -F "runtimeVersion=$(npx --yes @expo/fingerprint .)" \
+            -F "runtimeVersion=${{ needs.fingerprint.outputs.hash }}" \
             -F "channel=<%= ota.channel %>" \
             -F "commitHash=${{ github.sha }}" \
             -F "commitMessage=${{ github.event.head_commit.message }}" \

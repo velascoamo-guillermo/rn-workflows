@@ -97,4 +97,46 @@ build: {}
 `;
     expect(() => parseConfig(bad)).toThrow(/at least one build profile/);
   });
+
+  it('parses build profile with ota config', () => {
+    const cfg = parseConfig(`
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+ci: github-actions
+build:
+  production:
+    platform: all
+    distribution: store
+    android:
+      buildType: aab
+    ota:
+      server: https://ota.myapp.com
+      channel: production
+`);
+    expect(cfg.build.production?.ota?.server).toBe('https://ota.myapp.com');
+    expect(cfg.build.production?.ota?.channel).toBe('production');
+  });
+
+  it('rejects ota config with empty channel', () => {
+    expect(() =>
+      parseConfig(`
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+ci: github-actions
+build:
+  production:
+    platform: all
+    distribution: store
+    android:
+      buildType: aab
+    ota:
+      server: https://ota.myapp.com
+      channel: ''
+`),
+    ).toThrow(ConfigError);
+  });
 });

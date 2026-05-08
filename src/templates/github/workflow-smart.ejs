@@ -81,12 +81,12 @@ jobs:
       - name: Compute fingerprint
         id: fp
         run: |
-          HASH=$(npx --yes @expo/fingerprint .)
+          HASH=$(npx --yes @expo/fingerprint . 2>/dev/null)
           echo "hash=$HASH" >> $GITHUB_OUTPUT
 
       - name: Check if native binary exists for this fingerprint
         id: cache-check
-        uses: actions/cache/restore@v4
+        uses: actions/cache@v4
         with:
           key: fingerprint-${{ steps.fp.outputs.hash }}
           path: .rn-fingerprint
@@ -209,7 +209,7 @@ jobs:
   save-fingerprint:
     name: Save fingerprint cache
     runs-on: ubuntu-latest
-    needs: [fingerprint<% for (const job of jobs) { %>, <%= job.id %><% } %>]
+    needs: [fingerprint<% for (const job of jobs) { -%>, <%= job.id -%><% } %>]
     if: |
       always() &&
       needs.fingerprint.outputs.native_exists != 'true' &&

@@ -35,6 +35,7 @@ project:
   type: expo         # or bare
   bundleId: com.myapp
   packageName: com.myapp
+  scheme: MyApp      # optional — Xcode scheme, i.e. ios/MyApp.xcworkspace
 
 ci: github-actions   # or gitlab
 
@@ -57,6 +58,21 @@ build:
     ios:
       exportMethod: app-store
 ```
+
+### `project.scheme`
+
+The Xcode scheme is **not** derived from the bundle id. `expo prebuild` names the
+Xcode project after the Expo `name` field in `app.json` (`name: "Pawlog"` →
+`ios/Pawlog.xcworkspace`, scheme `Pawlog`), which frequently differs from the
+bundle id slug.
+
+Resolution order:
+
+1. `project.scheme` in `rn-workflows.yml` (explicit — required for bare projects
+   with a custom scheme, or Expo projects using a dynamic `app.config.js`)
+2. `expo.name` from `app.json` / `app.config.json`, sanitized the same way
+   `expo prebuild` sanitizes it (`My App` → `MyApp`), when `project.type: expo`
+3. last segment of `bundleId` (legacy fallback)
 
 ## Supported distributions
 

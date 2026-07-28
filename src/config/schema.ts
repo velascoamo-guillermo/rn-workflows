@@ -65,6 +65,13 @@ export const ProjectSchema = z.object({
   type: ProjectTypeSchema,
   bundleId: z.string().min(1),
   packageName: z.string().min(1),
+  /**
+   * Xcode scheme / project name, i.e. `ios/<scheme>.xcworkspace`.
+   * For Expo projects this is derived from `expo.name` in app.json by
+   * `expo prebuild` — NOT from the bundle id. Leave unset to auto-detect
+   * (Expo) or fall back to the last segment of `bundleId`.
+   */
+  scheme: z.string().min(1).optional(),
 });
 
 export const ChecksSchema = z.object({

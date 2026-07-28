@@ -10,6 +10,7 @@ import {
   type CiProvider,
   type ProjectType,
 } from '../config/schema.ts';
+import { detectExpoScheme } from '../utils/expo.ts';
 
 export default defineCommand({
   meta: {
@@ -56,6 +57,18 @@ export default defineCommand({
       defaultValue: bundleId,
     })) as string;
     assertNotCancelled(packageName);
+
+    // `expo prebuild` names the Xcode project after `expo.name`, not the bundle id.
+    const defaultScheme =
+      (projectType === 'expo' ? detectExpoScheme(String(args.cwd)) : undefined) ??
+      bundleId.split('.').pop() ??
+      'App';
+    const scheme = (await p.text({
+      message: 'Xcode scheme (ios/<scheme>.xcworkspace)',
+      placeholder: defaultScheme,
+      defaultValue: defaultScheme,
+    })) as string;
+    assertNotCancelled(scheme);
 
     const ci = (await p.select({
       message: 'CI provider',
@@ -111,7 +124,7 @@ export default defineCommand({
     }
 
     const config = {
-      project: { type: projectType, bundleId, packageName },
+      project: { type: projectType, bundleId, packageName, scheme },
       ci,
       checks: { test: true, lint: true, typecheck: true },
       build,

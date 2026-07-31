@@ -19,8 +19,10 @@ export interface GithubActionsOptions {
   workflowsDir?: string;
   /**
    * Posix-relative path from the git root to the app directory.
-   * When set (monorepo), workflows get `defaults.run.working-directory`
-   * and an `on.push.paths` filter scoped to this subdir.
+   * When set (monorepo), workflows get an `on.push.paths` filter scoped to
+   * this subdir, per-job `defaults.run.working-directory` on jobs that check
+   * out code, and app-dir-aware action inputs (setup-ruby working-directory,
+   * setup-node cache-dependency-path, actions/cache paths).
    */
   appDir?: string;
   /** Filename prefix to avoid collisions between apps in the same monorepo. */

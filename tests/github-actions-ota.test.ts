@@ -18,49 +18,49 @@ const baseOtaConfig: Config = {
 
 describe('generateGithubActions with OTA', () => {
   test('output is valid YAML', () => {
-    const { content } = generateGithubActions(baseOtaConfig)[0];
+    const { content } = generateGithubActions(baseOtaConfig)[0]!;
     expect(() => yaml.load(content)).not.toThrow();
   });
 
   test('includes fingerprint job', () => {
-    const { content } = generateGithubActions(baseOtaConfig)[0];
+    const { content } = generateGithubActions(baseOtaConfig)[0]!;
     expect(content).toContain('fingerprint:');
     expect(content).toContain('@expo/fingerprint');
   });
 
   test('includes ota-update job', () => {
-    const { content } = generateGithubActions(baseOtaConfig)[0];
+    const { content } = generateGithubActions(baseOtaConfig)[0]!;
     expect(content).toContain('ota-update:');
   });
 
   test('ota-update job posts to configured server', () => {
-    const { content } = generateGithubActions(baseOtaConfig)[0];
+    const { content } = generateGithubActions(baseOtaConfig)[0]!;
     expect(content).toContain('https://ota.myapp.com/api/upload');
   });
 
   test('ota-update job uses configured channel', () => {
-    const { content } = generateGithubActions(baseOtaConfig)[0];
+    const { content } = generateGithubActions(baseOtaConfig)[0]!;
     expect(content).toContain('channel=production');
   });
 
   test('ota-update job injects OTA_UPLOAD_KEY secret', () => {
-    const { content } = generateGithubActions(baseOtaConfig)[0];
+    const { content } = generateGithubActions(baseOtaConfig)[0]!;
     expect(content).toContain('OTA_UPLOAD_KEY');
     expect(content).toContain('secrets.OTA_UPLOAD_KEY');
   });
 
   test('native build jobs are conditioned on native_exists != true', () => {
-    const { content } = generateGithubActions(baseOtaConfig)[0];
+    const { content } = generateGithubActions(baseOtaConfig)[0]!;
     expect(content).toContain("native_exists != 'true'");
   });
 
   test('ota-update job is conditioned on native_exists == true', () => {
-    const { content } = generateGithubActions(baseOtaConfig)[0];
+    const { content } = generateGithubActions(baseOtaConfig)[0]!;
     expect(content).toContain("native_exists == 'true'");
   });
 
   test('includes save-fingerprint job', () => {
-    const { content } = generateGithubActions(baseOtaConfig)[0];
+    const { content } = generateGithubActions(baseOtaConfig)[0]!;
     expect(content).toContain('save-fingerprint:');
     expect(content).toContain('actions/cache/save@v4');
   });
@@ -73,13 +73,13 @@ describe('generateGithubActions with OTA', () => {
         production: { platform: 'android', distribution: 'firebase' },
       },
     };
-    const { content } = generateGithubActions(noOtaConfig)[0];
+    const { content } = generateGithubActions(noOtaConfig)[0]!;
     expect(content).not.toContain('fingerprint:');
     expect(content).not.toContain('ota-update:');
   });
 
   test('output matches snapshot', () => {
-    const { content } = generateGithubActions(baseOtaConfig)[0];
+    const { content } = generateGithubActions(baseOtaConfig)[0]!;
     expect(content).toMatchSnapshot();
   });
 });

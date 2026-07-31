@@ -140,7 +140,7 @@ async function detectOrPromptFirebaseProject(): Promise<string> {
     if (result.exitCode === 0) {
       type FbProject = { projectId: string; displayName: string };
       const projects: FbProject[] = JSON.parse(result.stdout || '[]').result ?? [];
-      if (projects.length === 1) return projects[0].projectId;
+      if (projects.length === 1) return projects[0]!.projectId;
       if (projects.length > 1) {
         const chosen = await p.select({
           message: 'Select Firebase project',

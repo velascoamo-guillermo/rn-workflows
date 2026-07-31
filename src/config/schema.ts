@@ -75,10 +75,24 @@ export const ChecksSchema = z.object({
 
 export type Checks = z.infer<typeof ChecksSchema>;
 
+export const CiObjectSchema = z.object({
+  provider: CiSchema,
+  workflowsDir: z.string().min(1, 'workflowsDir cannot be empty').optional(),
+});
+
+export interface Config {
+  project: z.infer<typeof ProjectSchema>;
+  ci: CiProvider;
+  checks?: Checks;
+  build: Record<string, BuildProfile>;
+  /** From `ci.workflowsDir` — overrides where GitHub workflow files are emitted. */
+  workflowsDir?: string;
+}
+
 export const ConfigSchema = z
   .object({
     project: ProjectSchema,
-    ci: CiSchema,
+    ci: z.union([CiSchema, CiObjectSchema]),
     checks: ChecksSchema.optional(),
     build: z.record(z.string().min(1), BuildProfileSchema),
   })
@@ -115,6 +129,15 @@ export const ConfigSchema = z
         });
       }
     }
+  })
+  .transform((cfg): Config => {
+    const ci = typeof cfg.ci === 'string' ? { provider: cfg.ci } : cfg.ci;
+    const out: Config = {
+      project: cfg.project,
+      ci: ci.provider,
+      build: cfg.build,
+    };
+    if (cfg.checks !== undefined) out.checks = cfg.checks;
+    if (ci.workflowsDir !== undefined) out.workflowsDir = ci.workflowsDir;
+    return out;
   });
-
-export type Config = z.infer<typeof ConfigSchema>;

@@ -1,13 +1,22 @@
 import { defineCommand } from 'citty';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import * as p from '@clack/prompts';
 import { loadConfig, ConfigError } from '../config/parser.ts';
 import { CI_PROVIDERS, type CiProvider } from '../config/schema.ts';
 import { generateFastlane, type GeneratedFile } from '../generators/fastlane.ts';
-import { generateGithubActions } from '../generators/github-actions.ts';
+import {
+  generateGithubActions,
+  type GithubActionsOptions,
+} from '../generators/github-actions.ts';
 import { generateGitlab } from '../generators/gitlab.ts';
 import { writeFileEnsured } from '../utils/fs.ts';
+import {
+  findGitRoot,
+  resolveWorkflowsDir,
+  slugify,
+  toPosixRelative,
+} from '../utils/monorepo.ts';
 
 function detectPackageManager(cwd: string): 'yarn' | 'npm' | 'bun' {
   if (existsSync(resolve(cwd, 'bun.lock')) || existsSync(resolve(cwd, 'bun.lockb'))) return 'bun';
@@ -41,6 +50,11 @@ export default defineCommand({
       description: 'Working directory to write output into',
       default: process.cwd(),
     },
+    'workflows-dir': {
+      type: 'string',
+      description:
+        'Directory to emit GitHub workflow files into (relative paths resolve against --cwd). Overrides ci.workflowsDir. Default: <git root>/.github/workflows',
+    },
   },
   async run({ args }) {
     const configPath = resolve(String(args.cwd), String(args.config));
@@ -69,13 +83,30 @@ export default defineCommand({
       config = { ...config, ci: args.ci as CiProvider };
     }
 
-    const packageManager = detectPackageManager(String(args.cwd));
-    const options = { packageManager };
+    const appDirAbs = resolve(String(args.cwd));
+    const packageManager = detectPackageManager(appDirAbs);
+
+    // Workflow files must live at the git root — GitHub only reads
+    // .github/workflows there. Everything else stays in the app dir.
+    const gitRoot = findGitRoot(appDirAbs);
+    const appDir = gitRoot ? toPosixRelative(gitRoot, appDirAbs) : '';
+    const workflowsDir = resolveWorkflowsDir({
+      cwd: appDirAbs,
+      gitRoot,
+      ...(args['workflows-dir'] ? { flag: String(args['workflows-dir']) } : {}),
+      ...(config.workflowsDir ? { configValue: config.workflowsDir } : {}),
+    });
+
+    const githubOptions: GithubActionsOptions = {
+      packageManager,
+      workflowsDir,
+      ...(appDir ? { appDir, appSlug: slugify(basename(appDirAbs)) } : {}),
+    };
 
     const files: GeneratedFile[] = [
-      ...generateFastlane(config, options),
+      ...generateFastlane(config, { packageManager }),
       ...(config.ci === 'github-actions'
-        ? generateGithubActions(config, options)
+        ? generateGithubActions(config, githubOptions)
         : generateGitlab(config)),
     ];
 

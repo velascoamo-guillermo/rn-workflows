@@ -7,12 +7,21 @@ on:
   workflow_dispatch:
   push:
     branches: [<%= branch %>]
+<% if (appDir) { -%>
+    paths:
+      - '<%= appDir %>/**'
+<% } -%>
 
 jobs:
 <% if (hasChecks) { -%>
   quality:
     name: Quality checks
     runs-on: ubuntu-latest
+<% if (appDir) { -%>
+    defaults:
+      run:
+        working-directory: <%= appDir %>
+<% } -%>
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,6 +32,9 @@ jobs:
           node-version: 20
 <% if (packageManager !== 'bun') { -%>
           cache: <%= packageManager %>
+<% if (appDir) { -%>
+          cache-dependency-path: <%= appDir %>/<%= packageManager === 'npm' ? 'package-lock.json' : 'yarn.lock' %>
+<% } -%>
 <% } -%>
 
 <% if (packageManager === 'bun') { -%>
@@ -56,6 +68,11 @@ jobs:
 <% if (hasChecks) { -%>
     needs: quality
 <% } -%>
+<% if (appDir) { -%>
+    defaults:
+      run:
+        working-directory: <%= appDir %>
+<% } -%>
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -66,6 +83,9 @@ jobs:
           node-version: 20
 <% if (packageManager !== 'bun') { -%>
           cache: <%= packageManager %>
+<% if (appDir) { -%>
+          cache-dependency-path: <%= appDir %>/<%= packageManager === 'npm' ? 'package-lock.json' : 'yarn.lock' %>
+<% } -%>
 <% } -%>
 
 <% if (packageManager === 'bun') { -%>
@@ -78,6 +98,9 @@ jobs:
         with:
           ruby-version: 3.2
           bundler-cache: true
+<% if (appDir) { -%>
+          working-directory: <%= appDir %>
+<% } -%>
 
 <% if (job.platform === 'ios') { -%>
       - name: Select Xcode

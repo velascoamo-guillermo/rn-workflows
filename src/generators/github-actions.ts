@@ -13,11 +13,30 @@ function branchFor(profileName: string): string {
   return DEFAULT_BRANCH[profileName] ?? 'main';
 }
 
+export interface GithubActionsOptions {
+  packageManager?: 'yarn' | 'npm' | 'bun';
+  /** Directory workflow files are emitted into. Default: `.github/workflows`. */
+  workflowsDir?: string;
+  /**
+   * Posix-relative path from the git root to the app directory.
+   * When set (monorepo), workflows get an `on.push.paths` filter scoped to
+   * this subdir, per-job `defaults.run.working-directory` on jobs that check
+   * out code, and app-dir-aware action inputs (setup-ruby working-directory,
+   * setup-node cache-dependency-path, actions/cache paths).
+   */
+  appDir?: string;
+  /** Filename prefix to avoid collisions between apps in the same monorepo. */
+  appSlug?: string;
+}
+
 export function generateGithubActions(
   config: Config,
-  options: { packageManager?: 'yarn' | 'npm' | 'bun' } = {},
+  options: GithubActionsOptions = {},
 ): GeneratedFile[] {
   const packageManager = options.packageManager ?? 'yarn';
+  const workflowsDir = options.workflowsDir ?? '.github/workflows';
+  const appDir = options.appDir ?? '';
+  const slugPrefix = options.appSlug ? `${options.appSlug}-` : '';
   const files: GeneratedFile[] = [];
 
   for (const [name, profile] of Object.entries(config.build)) {
@@ -41,6 +60,7 @@ export function generateGithubActions(
       packageManager,
       checks,
       hasChecks,
+      appDir,
     };
 
     const templateName = profile.ota
@@ -52,7 +72,7 @@ export function generateGithubActions(
       ...(profile.ota ? { ota: profile.ota } : {}),
     });
 
-    files.push({ path: `.github/workflows/rn-${name}.yml`, content });
+    files.push({ path: `${workflowsDir}/rn-${slugPrefix}${name}.yml`, content });
   }
 
   return files;

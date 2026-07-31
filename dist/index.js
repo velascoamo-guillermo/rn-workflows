@@ -60,11 +60,16 @@ var AndroidBuildOptionsSchema = z.object({
 var IosBuildOptionsSchema = z.object({
   exportMethod: z.enum(["app-store", "ad-hoc", "development"]).optional()
 });
+var OtaConfigSchema = z.object({
+  server: z.string().min(1),
+  channel: z.string().min(1)
+});
 var BuildProfileSchema = z.object({
   platform: PlatformSchema,
   distribution: DistributionStringSchema,
   android: AndroidBuildOptionsSchema.optional(),
-  ios: IosBuildOptionsSchema.optional()
+  ios: IosBuildOptionsSchema.optional(),
+  ota: OtaConfigSchema.optional()
 });
 var ProjectSchema = z.object({
   type: ProjectTypeSchema,
@@ -76,9 +81,13 @@ var ChecksSchema = z.object({
   lint: z.boolean().optional(),
   typecheck: z.boolean().optional()
 });
+var CiObjectSchema = z.object({
+  provider: CiSchema,
+  workflowsDir: z.string().min(1, "workflowsDir cannot be empty").optional()
+});
 var ConfigSchema = z.object({
   project: ProjectSchema,
-  ci: CiSchema,
+  ci: z.union([CiSchema, CiObjectSchema]),
   checks: ChecksSchema.optional(),
   build: z.record(z.string().min(1), BuildProfileSchema)
 }).superRefine((cfg, ctx) => {
@@ -112,6 +121,18 @@ var ConfigSchema = z.object({
       });
     }
   }
+}).transform((cfg) => {
+  const ci = typeof cfg.ci === "string" ? { provider: cfg.ci } : cfg.ci;
+  const out = {
+    project: cfg.project,
+    ci: ci.provider,
+    build: cfg.build
+  };
+  if (cfg.checks !== undefined)
+    out.checks = cfg.checks;
+  if (ci.workflowsDir !== undefined)
+    out.workflowsDir = ci.workflowsDir;
+  return out;
 });
 
 // src/commands/init.ts
@@ -226,7 +247,7 @@ function assertNotCancelled(value) {
 
 // src/commands/generate.ts
 import { defineCommand as defineCommand2 } from "citty";
-import { resolve as resolve2 } from "node:path";
+import { basename, resolve as resolve3 } from "node:path";
 import { existsSync as existsSync2 } from "node:fs";
 import * as p2 from "@clack/prompts";
 
@@ -414,6 +435,9 @@ function branchFor(profileName) {
 }
 function generateGithubActions(config, options = {}) {
   const packageManager = options.packageManager ?? "yarn";
+  const workflowsDir = options.workflowsDir ?? ".github/workflows";
+  const appDir = options.appDir ?? "";
+  const slugPrefix = options.appSlug ? `${options.appSlug}-` : "";
   const files = [];
   for (const [name, profile] of Object.entries(config.build)) {
     const platforms = platformsFor(profile.platform);
@@ -427,15 +451,21 @@ function generateGithubActions(config, options = {}) {
     }));
     const checks = config.checks ?? {};
     const hasChecks = checks.test || checks.lint || checks.typecheck;
-    const content = renderTemplate("github/workflow.ejs", {
+    const templateData = {
       workflowName: `rn-workflows • ${name}`,
       branch: branchFor(name),
       jobs,
       packageManager,
       checks,
-      hasChecks
+      hasChecks,
+      appDir
+    };
+    const templateName = profile.ota ? "github/workflow-smart.ejs" : "github/workflow.ejs";
+    const content = renderTemplate(templateName, {
+      ...templateData,
+      ...profile.ota ? { ota: profile.ota } : {}
     });
-    files.push({ path: `.github/workflows/rn-${name}.yml`, content });
+    files.push({ path: `${workflowsDir}/rn-${slugPrefix}${name}.yml`, content });
   }
   return files;
 }
@@ -476,13 +506,43 @@ function writeFileEnsured(path, content) {
   writeFileSync2(path, content, "utf8");
 }
 
+// src/utils/monorepo.ts
+import { execFileSync } from "node:child_process";
+import { join as join2, relative, resolve as resolve2, sep } from "node:path";
+function findGitRoot(cwd) {
+  try {
+    const out = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    const root = out.toString().trim();
+    return root.length > 0 ? root : null;
+  } catch {
+    return null;
+  }
+}
+function slugify(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function toPosixRelative(from, to) {
+  return relative(from, to).split(sep).join("/");
+}
+function resolveWorkflowsDir(input) {
+  const { cwd, gitRoot, flag, configValue } = input;
+  if (flag)
+    return resolve2(cwd, flag);
+  if (configValue)
+    return resolve2(cwd, configValue);
+  return join2(gitRoot ?? cwd, ".github", "workflows");
+}
+
 // src/commands/generate.ts
 function detectPackageManager(cwd) {
-  if (existsSync2(resolve2(cwd, "bun.lock")) || existsSync2(resolve2(cwd, "bun.lockb")))
+  if (existsSync2(resolve3(cwd, "bun.lock")) || existsSync2(resolve3(cwd, "bun.lockb")))
     return "bun";
-  if (existsSync2(resolve2(cwd, "yarn.lock")))
+  if (existsSync2(resolve3(cwd, "yarn.lock")))
     return "yarn";
-  if (existsSync2(resolve2(cwd, "package-lock.json")))
+  if (existsSync2(resolve3(cwd, "package-lock.json")))
     return "npm";
   return "yarn";
 }
@@ -510,10 +570,14 @@ var generate_default = defineCommand2({
       type: "string",
       description: "Working directory to write output into",
       default: process.cwd()
+    },
+    "workflows-dir": {
+      type: "string",
+      description: "Directory to emit GitHub workflow files into (relative paths resolve against --cwd). Overrides ci.workflowsDir. Default: <git root>/.github/workflows"
     }
   },
   async run({ args }) {
-    const configPath = resolve2(String(args.cwd), String(args.config));
+    const configPath = resolve3(String(args.cwd), String(args.config));
     if (!existsSync2(configPath)) {
       p2.log.error(`Config not found: ${configPath}`);
       p2.log.info("Run `rn-workflows init` to create one.");
@@ -536,17 +600,30 @@ var generate_default = defineCommand2({
       }
       config = { ...config, ci: args.ci };
     }
-    const packageManager = detectPackageManager(String(args.cwd));
-    const options = { packageManager };
+    const appDirAbs = resolve3(String(args.cwd));
+    const packageManager = detectPackageManager(appDirAbs);
+    const gitRoot = findGitRoot(appDirAbs);
+    const appDir = gitRoot ? toPosixRelative(gitRoot, appDirAbs) : "";
+    const workflowsDir = resolveWorkflowsDir({
+      cwd: appDirAbs,
+      gitRoot,
+      ...args["workflows-dir"] ? { flag: String(args["workflows-dir"]) } : {},
+      ...config.workflowsDir ? { configValue: config.workflowsDir } : {}
+    });
+    const githubOptions = {
+      packageManager,
+      workflowsDir,
+      ...appDir ? { appDir, appSlug: slugify(basename(appDirAbs)) } : {}
+    };
     const files = [
-      ...generateFastlane(config, options),
-      ...config.ci === "github-actions" ? generateGithubActions(config, options) : generateGitlab(config)
+      ...generateFastlane(config, { packageManager }),
+      ...config.ci === "github-actions" ? generateGithubActions(config, githubOptions) : generateGitlab(config)
     ];
     const outDir = String(args.cwd);
     const dryRun = Boolean(args["dry-run"]);
     p2.log.info(`${dryRun ? "[dry-run] " : ""}Generating ${files.length} file(s) in ${outDir}`);
     for (const file of files) {
-      const abs = resolve2(outDir, file.path);
+      const abs = resolve3(outDir, file.path);
       if (dryRun) {
         p2.log.step(`would write ${file.path} (${file.content.length} bytes)`);
       } else {
@@ -560,7 +637,7 @@ var generate_default = defineCommand2({
 
 // src/commands/setup.ts
 import { defineCommand as defineCommand3 } from "citty";
-import { resolve as resolve3 } from "node:path";
+import { resolve as resolve4 } from "node:path";
 import { existsSync as existsSync5 } from "node:fs";
 import * as p5 from "@clack/prompts";
 
@@ -589,7 +666,7 @@ async function runSteps(steps, ctx) {
 
 // src/setup/firebase.ts
 import { tmpdir } from "node:os";
-import { join as join2 } from "node:path";
+import { join as join3 } from "node:path";
 import { unlinkSync, readFileSync as readFileSync3 } from "node:fs";
 
 // src/setup/shell.ts
@@ -704,7 +781,7 @@ function makeServiceAccountStep() {
 `).find((e) => e.includes("firebase-adminsdk"));
       if (!saEmail)
         throw new Error("firebase-adminsdk service account not found. Enable Firebase in your project.");
-      const tmpPath = join2(tmpdir(), `rn-workflows-sa-${Date.now()}.json`);
+      const tmpPath = join3(tmpdir(), `rn-workflows-sa-${Date.now()}.json`);
       const r = shell("gcloud", [
         "iam",
         "service-accounts",
@@ -921,7 +998,7 @@ var setup_default = defineCommand3({
   },
   async run({ args }) {
     p5.intro("rn-workflows setup");
-    const configPath = resolve3(String(args.cwd), String(args.config));
+    const configPath = resolve4(String(args.cwd), String(args.config));
     if (!existsSync5(configPath)) {
       p5.log.error(`Config not found: ${configPath}`);
       p5.log.info("Run `rn-workflows init` first.");
@@ -1041,7 +1118,7 @@ function assertNotCancelled2(value) {
 
 // src/commands/menu.ts
 import { existsSync as existsSync6 } from "node:fs";
-import { resolve as resolve4 } from "node:path";
+import { resolve as resolve5 } from "node:path";
 import * as p6 from "@clack/prompts";
 import { spawnSync as spawnSync2 } from "node:child_process";
 var MENU_CHOICES = [
@@ -1106,7 +1183,7 @@ async function runMenu(cwd = process.cwd()) {
   }
 }
 async function handleSetupMenu(cwd) {
-  const configPath = resolve4(cwd, "rn-workflows.yml");
+  const configPath = resolve5(cwd, "rn-workflows.yml");
   if (!existsSync6(configPath)) {
     p6.log.error("rn-workflows.yml not found. Run Init project first.");
     return;
@@ -1259,14 +1336,14 @@ async function handleConfigureAppleAuth(cwd) {
   });
   if (typeof method === "symbol")
     return;
-  const envPath = resolve4(cwd, "fastlane", ".env");
+  const envPath = resolve5(cwd, "fastlane", ".env");
   let existing = "";
   try {
     existing = (await import("node:fs")).readFileSync(envPath, "utf8");
   } catch {}
   const { writeFileSync: writeFileSync3 } = await import("node:fs");
   const { mkdirSync: mkdirSync2 } = await import("node:fs");
-  mkdirSync2(resolve4(cwd, "fastlane"), { recursive: true });
+  mkdirSync2(resolve5(cwd, "fastlane"), { recursive: true });
   if (method === "asc") {
     const keyId = await promptText("Key ID (from App Store Connect)");
     const issuerId = await promptText("Issuer ID (from App Store Connect)");

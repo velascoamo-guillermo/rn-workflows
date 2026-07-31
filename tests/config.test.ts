@@ -25,6 +25,59 @@ describe('config parser', () => {
     expect(cfg.ci).toBe('gitlab');
   });
 
+  it('parses ci as object with provider and workflowsDir', () => {
+    const raw = `
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+ci:
+  provider: github-actions
+  workflowsDir: ../../.github/workflows
+build:
+  preview:
+    platform: android
+    distribution: firebase
+`;
+    const cfg = parseConfig(raw);
+    expect(cfg.ci).toBe('github-actions');
+    expect(cfg.workflowsDir).toBe('../../.github/workflows');
+  });
+
+  it('parses ci object without workflowsDir', () => {
+    const raw = `
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+ci:
+  provider: gitlab
+build:
+  preview:
+    platform: android
+    distribution: firebase
+`;
+    const cfg = parseConfig(raw);
+    expect(cfg.ci).toBe('gitlab');
+    expect(cfg.workflowsDir).toBeUndefined();
+  });
+
+  it('rejects ci object with invalid provider', () => {
+    const raw = `
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+ci:
+  provider: circleci
+build:
+  preview:
+    platform: android
+    distribution: firebase
+`;
+    expect(() => parseConfig(raw)).toThrow(ConfigError);
+  });
+
   it('rejects missing bundleId', () => {
     const bad = `
 project:

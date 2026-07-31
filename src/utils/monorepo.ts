@@ -1,5 +1,35 @@
 import { execFileSync } from 'node:child_process';
+import { readdirSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
+
+/** Config filename scanned for by `discoverConfigs`. */
+export const CONFIG_FILENAME = 'rn-workflows.yml';
+
+/**
+ * Absolute paths of every `rn-workflows.yml` under `root`, sorted for
+ * deterministic output. Skips `node_modules` and dot-directories.
+ */
+export function discoverConfigs(root: string): string[] {
+  const found: string[] = [];
+  const walk = (dir: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // unreadable dir — skip
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+        walk(join(dir, entry.name));
+      } else if (entry.isFile() && entry.name === CONFIG_FILENAME) {
+        found.push(join(dir, entry.name));
+      }
+    }
+  };
+  walk(root);
+  return found.sort();
+}
 
 /**
  * Absolute path of the git toplevel containing `cwd`, or null when `cwd`

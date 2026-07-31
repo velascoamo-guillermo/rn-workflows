@@ -247,7 +247,7 @@ function assertNotCancelled(value) {
 
 // src/commands/generate.ts
 import { defineCommand as defineCommand2 } from "citty";
-import { basename, resolve as resolve3 } from "node:path";
+import { basename, dirname as dirname3, join as join3, resolve as resolve3 } from "node:path";
 import { existsSync as existsSync2 } from "node:fs";
 import * as p2 from "@clack/prompts";
 
@@ -498,6 +498,66 @@ function generateGitlab(config) {
   return [{ path: ".gitlab-ci.yml", content }];
 }
 
+// src/generators/github-matrix.ts
+var MATRIX_WORKFLOW_FILENAME = "rn-release-matrix.yml";
+function legDir(dir) {
+  return dir === "" ? "." : dir;
+}
+function generateMatrixWorkflow(apps, options = {}) {
+  if (apps.length === 0) {
+    throw new Error("generateMatrixWorkflow requires at least one app");
+  }
+  const packageManager = options.packageManager ?? "yarn";
+  const workflowsDir = options.workflowsDir ?? ".github/workflows";
+  const qualityLegs = [];
+  const releaseLegs = [];
+  const secretUnion = new Set;
+  let hasIos = false;
+  for (const app of apps) {
+    const checks = app.config.checks ?? {};
+    if (checks.lint || checks.typecheck || checks.test) {
+      qualityLegs.push({
+        app: app.slug,
+        dir: legDir(app.dir),
+        lint: checks.lint ?? false,
+        typecheck: checks.typecheck ?? false,
+        test: checks.test ?? false
+      });
+    }
+    for (const [profileName, profile] of Object.entries(app.config.build)) {
+      for (const platform of platformsFor(profile.platform)) {
+        if (platform === "ios")
+          hasIos = true;
+        for (const secret of secretsFor(platform, profile.distribution)) {
+          secretUnion.add(secret);
+        }
+        releaseLegs.push({
+          app: app.slug,
+          dir: legDir(app.dir),
+          profile: profileName,
+          platform,
+          runsOn: platform === "ios" ? "macos-latest" : "ubuntu-latest",
+          ota: profile.ota !== undefined,
+          otaServer: profile.ota?.server ?? "",
+          otaChannel: profile.ota?.channel ?? ""
+        });
+      }
+    }
+  }
+  const secrets = [...secretUnion].sort();
+  const hasOta = releaseLegs.some((leg) => leg.ota);
+  const content = renderTemplate("github/workflow-matrix.ejs", {
+    packageManager,
+    qualityLegsJson: JSON.stringify(qualityLegs),
+    releaseLegsJson: JSON.stringify(releaseLegs),
+    hasQuality: qualityLegs.length > 0,
+    hasOta,
+    secrets,
+    matchAuth: hasIos && secrets.includes("MATCH_PASSWORD")
+  });
+  return { path: `${workflowsDir}/${MATRIX_WORKFLOW_FILENAME}`, content };
+}
+
 // src/utils/fs.ts
 import { mkdirSync, writeFileSync as writeFileSync2 } from "node:fs";
 import { dirname as dirname2 } from "node:path";
@@ -508,7 +568,31 @@ function writeFileEnsured(path, content) {
 
 // src/utils/monorepo.ts
 import { execFileSync } from "node:child_process";
+import { readdirSync } from "node:fs";
 import { join as join2, relative, resolve as resolve2, sep } from "node:path";
+var CONFIG_FILENAME = "rn-workflows.yml";
+function discoverConfigs(root) {
+  const found = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules" || entry.name.startsWith("."))
+          continue;
+        walk(join2(dir, entry.name));
+      } else if (entry.isFile() && entry.name === CONFIG_FILENAME) {
+        found.push(join2(dir, entry.name));
+      }
+    }
+  };
+  walk(root);
+  return found.sort();
+}
 function findGitRoot(cwd) {
   try {
     const out = execFileSync("git", ["rev-parse", "--show-toplevel"], {
@@ -537,14 +621,88 @@ function resolveWorkflowsDir(input) {
 }
 
 // src/commands/generate.ts
-function detectPackageManager(cwd) {
-  if (existsSync2(resolve3(cwd, "bun.lock")) || existsSync2(resolve3(cwd, "bun.lockb")))
+function detectPackageManagerAt(dir) {
+  if (existsSync2(resolve3(dir, "bun.lock")) || existsSync2(resolve3(dir, "bun.lockb")))
     return "bun";
-  if (existsSync2(resolve3(cwd, "yarn.lock")))
+  if (existsSync2(resolve3(dir, "yarn.lock")))
     return "yarn";
-  if (existsSync2(resolve3(cwd, "package-lock.json")))
+  if (existsSync2(resolve3(dir, "package-lock.json")))
     return "npm";
+  return null;
+}
+function detectPackageManager(...dirs) {
+  for (const dir of dirs) {
+    const pm = detectPackageManagerAt(dir);
+    if (pm)
+      return pm;
+  }
   return "yarn";
+}
+function writeFiles(files, { outDir, dryRun }) {
+  p2.log.info(`${dryRun ? "[dry-run] " : ""}Generating ${files.length} file(s) in ${outDir}`);
+  for (const file of files) {
+    const abs = resolve3(outDir, file.path);
+    if (dryRun) {
+      p2.log.step(`would write ${file.path} (${file.content.length} bytes)`);
+    } else {
+      writeFileEnsured(abs, file.content);
+      p2.log.step(`wrote ${file.path}`);
+    }
+  }
+  p2.outro(dryRun ? "Dry run complete." : "Done.");
+}
+function runMatrix(args) {
+  const gitRoot = findGitRoot(args.cwd);
+  if (!gitRoot) {
+    p2.log.error("generate --matrix requires running inside a git repository.");
+    process.exit(1);
+  }
+  const configPaths = discoverConfigs(gitRoot);
+  if (configPaths.length === 0) {
+    p2.log.error(`No rn-workflows.yml found under ${gitRoot}.`);
+    p2.log.info("Run `rn-workflows init` in each app directory first.");
+    process.exit(1);
+  }
+  const apps = [];
+  for (const configPath of configPaths) {
+    let config;
+    try {
+      config = loadConfig(configPath);
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        p2.log.error(`${configPath}: ${err.message}`);
+        process.exit(1);
+      }
+      throw err;
+    }
+    if (config.ci !== "github-actions") {
+      p2.log.warn(`Skipping ${configPath}: matrix workflows are GitHub Actions only.`);
+      continue;
+    }
+    const appDirAbs = dirname3(configPath);
+    const dir = toPosixRelative(gitRoot, appDirAbs);
+    apps.push({ dir, slug: slugify(basename(appDirAbs)), config });
+  }
+  if (apps.length === 0) {
+    p2.log.error("No github-actions configs discovered — nothing to generate.");
+    process.exit(1);
+  }
+  const slugCounts = new Map;
+  for (const app of apps)
+    slugCounts.set(app.slug, (slugCounts.get(app.slug) ?? 0) + 1);
+  for (const app of apps) {
+    if ((slugCounts.get(app.slug) ?? 0) > 1 && app.dir !== "")
+      app.slug = slugify(app.dir);
+  }
+  const workflowsDir = resolveWorkflowsDir({
+    cwd: gitRoot,
+    gitRoot,
+    ...args.workflowsDirFlag ? { flag: args.workflowsDirFlag } : {}
+  });
+  const packageManager = detectPackageManager(gitRoot, ...apps.map((app) => join3(gitRoot, app.dir)));
+  p2.log.info(`Matrix mode: ${apps.length} app(s) — ${apps.map((app) => app.slug).join(", ")}`);
+  const file = generateMatrixWorkflow(apps, { packageManager, workflowsDir });
+  writeFiles([file], { outDir: gitRoot, dryRun: args.dryRun });
 }
 var generate_default = defineCommand2({
   meta: {
@@ -574,9 +732,22 @@ var generate_default = defineCommand2({
     "workflows-dir": {
       type: "string",
       description: "Directory to emit GitHub workflow files into (relative paths resolve against --cwd). Overrides ci.workflowsDir. Default: <git root>/.github/workflows"
+    },
+    matrix: {
+      type: "boolean",
+      description: "Monorepo mode: discover every rn-workflows.yml under the git root and emit a single strategy.matrix release workflow (GitHub Actions only)",
+      default: false
     }
   },
   async run({ args }) {
+    if (args.matrix) {
+      runMatrix({
+        cwd: resolve3(String(args.cwd)),
+        ...args["workflows-dir"] ? { workflowsDirFlag: String(args["workflows-dir"]) } : {},
+        dryRun: Boolean(args["dry-run"])
+      });
+      return;
+    }
     const configPath = resolve3(String(args.cwd), String(args.config));
     if (!existsSync2(configPath)) {
       p2.log.error(`Config not found: ${configPath}`);
@@ -619,19 +790,7 @@ var generate_default = defineCommand2({
       ...generateFastlane(config, { packageManager }),
       ...config.ci === "github-actions" ? generateGithubActions(config, githubOptions) : generateGitlab(config)
     ];
-    const outDir = String(args.cwd);
-    const dryRun = Boolean(args["dry-run"]);
-    p2.log.info(`${dryRun ? "[dry-run] " : ""}Generating ${files.length} file(s) in ${outDir}`);
-    for (const file of files) {
-      const abs = resolve3(outDir, file.path);
-      if (dryRun) {
-        p2.log.step(`would write ${file.path} (${file.content.length} bytes)`);
-      } else {
-        writeFileEnsured(abs, file.content);
-        p2.log.step(`wrote ${file.path}`);
-      }
-    }
-    p2.outro(dryRun ? "Dry run complete." : "Done.");
+    writeFiles(files, { outDir: String(args.cwd), dryRun: Boolean(args["dry-run"]) });
   }
 });
 
@@ -666,7 +825,7 @@ async function runSteps(steps, ctx) {
 
 // src/setup/firebase.ts
 import { tmpdir } from "node:os";
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 import { unlinkSync, readFileSync as readFileSync3 } from "node:fs";
 
 // src/setup/shell.ts
@@ -781,7 +940,7 @@ function makeServiceAccountStep() {
 `).find((e) => e.includes("firebase-adminsdk"));
       if (!saEmail)
         throw new Error("firebase-adminsdk service account not found. Enable Firebase in your project.");
-      const tmpPath = join3(tmpdir(), `rn-workflows-sa-${Date.now()}.json`);
+      const tmpPath = join4(tmpdir(), `rn-workflows-sa-${Date.now()}.json`);
       const r = shell("gcloud", [
         "iam",
         "service-accounts",

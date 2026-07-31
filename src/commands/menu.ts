@@ -208,7 +208,7 @@ async function handleRemoveDevice(): Promise<void> {
   }
 }
 
-async function handleViewProfiles(cwd: string): Promise<void> {
+async function handleViewProfiles(_cwd: string): Promise<void> {
   let matchGitUrl = process.env['MATCH_GIT_URL'];
   if (!matchGitUrl) {
     matchGitUrl = await promptText('Match repo URL (MATCH_GIT_URL)', { placeholder: 'https://github.com/owner/match-repo.git' });

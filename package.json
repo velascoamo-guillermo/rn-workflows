@@ -31,6 +31,10 @@
     "codegen"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/velascoamo-guillermo/rn-workflows.git"
+  },
   "engines": {
     "node": ">=20"
   },

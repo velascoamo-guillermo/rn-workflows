@@ -13,6 +13,7 @@ import { generateGitlab } from '../generators/gitlab.ts';
 import { generateMatrixWorkflow, type MatrixApp } from '../generators/github-matrix.ts';
 import { writeFileEnsured } from '../utils/fs.ts';
 import {
+  assignUniqueSlugs,
   discoverConfigs,
   findGitRoot,
   resolveMatrixWorkflowsDir,
@@ -103,11 +104,16 @@ function runMatrix(args: {
     process.exit(1);
   }
 
-  // De-duplicate slugs (two apps with the same dir basename) via full path.
-  const slugCounts = new Map<string, number>();
-  for (const app of apps) slugCounts.set(app.slug, (slugCounts.get(app.slug) ?? 0) + 1);
-  for (const app of apps) {
-    if ((slugCounts.get(app.slug) ?? 0) > 1 && app.dir !== '') app.slug = slugify(app.dir);
+  // Unique slugs: keep the basename when unique, fall back to the full
+  // path-derived slug on collision, fail loudly if slugs still collide.
+  try {
+    const slugs = assignUniqueSlugs(
+      apps.map((app) => ({ dir: app.dir, baseSlug: app.slug })),
+    );
+    for (const [i, app] of apps.entries()) app.slug = slugs[i]!;
+  } catch (err) {
+    p.log.error((err as Error).message);
+    process.exit(1);
   }
 
   const { dir: workflowsDir, warnings: workflowsDirWarnings } = resolveMatrixWorkflowsDir({
@@ -222,6 +228,7 @@ export default defineCommand({
       packageManager,
       workflowsDir,
       ...(appDir ? { appDir, appSlug: slugify(basename(appDirAbs)) } : {}),
+      ...(gitRoot ? { workflowsPathFromRoot: toPosixRelative(gitRoot, workflowsDir) } : {}),
     };
 
     const files: GeneratedFile[] = [

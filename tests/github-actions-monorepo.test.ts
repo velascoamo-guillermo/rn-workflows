@@ -83,10 +83,46 @@ describe('generateGithubActions in a monorepo', () => {
     expect(Object.keys(parsed.jobs)).toEqual(['quality', 'build-android']);
   });
 
-  test('appDir adds on.push.paths filter scoped to the app subdir', () => {
+  test('appDir adds on.push.paths scoped to the app subdir plus the workflow file itself', () => {
     const { content } = generateGithubActions(baseConfig, monorepoOptions)[0]!;
     const parsed = parseWorkflow(content);
-    expect(parsed.on.push.paths).toEqual(['apps/mobile/**']);
+    expect(parsed.on.push.paths).toEqual([
+      'apps/mobile/**',
+      '.github/workflows/rn-mobile-preview.yml',
+    ]);
+  });
+
+  test('ci.extraPaths globs are appended to the paths filter before the self path', () => {
+    const config: Config = {
+      ...baseConfig,
+      extraPaths: ['packages/shared/**', 'package.json'],
+    };
+    const { content } = generateGithubActions(config, monorepoOptions)[0]!;
+    const parsed = parseWorkflow(content);
+    expect(parsed.on.push.paths).toEqual([
+      'apps/mobile/**',
+      'packages/shared/**',
+      'package.json',
+      '.github/workflows/rn-mobile-preview.yml',
+    ]);
+  });
+
+  test('workflowsPathFromRoot relocates the self path in the filter', () => {
+    const files = generateGithubActions(baseConfig, {
+      ...monorepoOptions,
+      workflowsPathFromRoot: 'ci/workflows',
+    });
+    const parsed = parseWorkflow(files[0]!.content);
+    expect(parsed.on.push.paths).toEqual([
+      'apps/mobile/**',
+      'ci/workflows/rn-mobile-preview.yml',
+    ]);
+  });
+
+  test('extraPaths without appDir emits no paths filter (non-monorepo unchanged)', () => {
+    const config: Config = { ...baseConfig, extraPaths: ['packages/shared/**'] };
+    const { content } = generateGithubActions(config)[0]!;
+    expect(content).not.toContain('paths:');
   });
 
   test('appSlug prefixes the emitted filename', () => {
@@ -150,7 +186,21 @@ describe('generateGithubActions in a monorepo', () => {
       const { content } = generateGithubActions(otaConfig, monorepoOptions)[0]!;
       const parsed = parseWorkflow(content);
       expect(parsed.defaults).toBeUndefined();
-      expect(parsed.on.push.paths).toEqual(['apps/mobile/**']);
+      expect(parsed.on.push.paths).toEqual([
+        'apps/mobile/**',
+        '.github/workflows/rn-mobile-production.yml',
+      ]);
+    });
+
+    test('ci.extraPaths and the self path also apply to the smart workflow filter', () => {
+      const config: Config = { ...otaConfig, extraPaths: ['packages/shared/**'] };
+      const { content } = generateGithubActions(config, monorepoOptions)[0]!;
+      const parsed = parseWorkflow(content);
+      expect(parsed.on.push.paths).toEqual([
+        'apps/mobile/**',
+        'packages/shared/**',
+        '.github/workflows/rn-mobile-production.yml',
+      ]);
     });
 
     test('sets per-job working-directory only on jobs that check out code', () => {

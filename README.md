@@ -26,7 +26,7 @@ bun add -d rn-workflows
 | Command | Description |
 | --- | --- |
 | `rn-workflows init` | Interactively create `rn-workflows.yml`. Use `--force` to overwrite. |
-| `rn-workflows generate` | Generate Fastlane + CI files from config. Flags: `--ci <provider>`, `--dry-run`, `--config <path>`, `--cwd <dir>`. |
+| `rn-workflows generate` | Generate Fastlane + CI files from config. Flags: `--ci <provider>`, `--dry-run`, `--config <path>`, `--cwd <dir>`, `--workflows-dir <dir>`, `--matrix`. |
 
 ## Config shape
 
@@ -90,6 +90,23 @@ Given `ci: github-actions`:
 Given `ci: gitlab`:
 - `fastlane/Fastfile`, `fastlane/Appfile`, `fastlane/Pluginfile`, `Gemfile`
 - `.gitlab-ci.yml` with one stage per profile × platform
+
+## Monorepos (matrix mode)
+
+`rn-workflows generate --matrix` discovers every `rn-workflows.yml` under the git root and emits a single `strategy.matrix` release workflow (GitHub Actions only). Fastlane files stay per-app — run plain `generate` inside each app directory.
+
+Where workflow files are written:
+
+- **Single-app `generate`**: `--workflows-dir` flag > `ci.workflowsDir` from `rn-workflows.yml` > `<git root>/.github/workflows`. Relative values resolve against the app directory (`--cwd`).
+- **`generate --matrix`**: the matrix file is one file shared by all apps, so per-app `ci.workflowsDir` values cannot apply individually. Precedence: `--workflows-dir` flag > unanimous `ci.workflowsDir` (used only when **every** discovered app declares the **same** value) > `<git root>/.github/workflows`. Relative values resolve against the git root. When apps declare divergent values (or only some declare one), the default is used and a warning names the ignored apps — pass `--workflows-dir` to pick a directory explicitly.
+
+Declare `ci.workflowsDir` with the object form of `ci`:
+
+```yaml
+ci:
+  provider: github-actions
+  workflowsDir: ci/workflows
+```
 
 ## Requirements
 

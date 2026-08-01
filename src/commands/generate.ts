@@ -15,6 +15,7 @@ import { writeFileEnsured } from '../utils/fs.ts';
 import {
   discoverConfigs,
   findGitRoot,
+  resolveMatrixWorkflowsDir,
   resolveWorkflowsDir,
   slugify,
   toPosixRelative,
@@ -109,11 +110,15 @@ function runMatrix(args: {
     if ((slugCounts.get(app.slug) ?? 0) > 1 && app.dir !== '') app.slug = slugify(app.dir);
   }
 
-  const workflowsDir = resolveWorkflowsDir({
-    cwd: gitRoot,
+  const { dir: workflowsDir, warnings: workflowsDirWarnings } = resolveMatrixWorkflowsDir({
     gitRoot,
     ...(args.workflowsDirFlag ? { flag: args.workflowsDirFlag } : {}),
+    apps: apps.map((app) => ({
+      dir: app.dir,
+      ...(app.config.workflowsDir ? { workflowsDir: app.config.workflowsDir } : {}),
+    })),
   });
+  for (const warning of workflowsDirWarnings) p.log.warn(warning);
   const packageManager = detectPackageManager(
     gitRoot,
     ...apps.map((app) => join(gitRoot, app.dir)),

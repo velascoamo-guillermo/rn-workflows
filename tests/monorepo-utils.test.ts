@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import {
   findGitRoot,
+  resolveMatrixWorkflowsDir,
   resolveWorkflowsDir,
   slugify,
   toPosixRelative,
@@ -45,6 +46,84 @@ describe('resolveWorkflowsDir', () => {
     expect(
       resolveWorkflowsDir({ cwd, gitRoot, flag: '/elsewhere/workflows' }),
     ).toBe('/elsewhere/workflows');
+  });
+});
+
+describe('resolveMatrixWorkflowsDir', () => {
+  const gitRoot = '/repo';
+
+  test('defaults to <gitRoot>/.github/workflows when no app declares ci.workflowsDir', () => {
+    const result = resolveMatrixWorkflowsDir({
+      gitRoot,
+      apps: [{ dir: 'apps/a' }, { dir: 'apps/b' }],
+    });
+    expect(result.dir).toBe('/repo/.github/workflows');
+    expect(result.warnings).toEqual([]);
+  });
+
+  test('unanimity: all apps declaring the SAME value uses it (resolved against gitRoot)', () => {
+    const result = resolveMatrixWorkflowsDir({
+      gitRoot,
+      apps: [
+        { dir: 'apps/a', workflowsDir: 'ci/workflows' },
+        { dir: 'apps/b', workflowsDir: 'ci/workflows' },
+      ],
+    });
+    expect(result.dir).toBe('/repo/ci/workflows');
+    expect(result.warnings).toEqual([]);
+  });
+
+  test('divergent values fall back to the default and warn naming the apps', () => {
+    const result = resolveMatrixWorkflowsDir({
+      gitRoot,
+      apps: [
+        { dir: 'apps/a', workflowsDir: 'ci/workflows' },
+        { dir: 'apps/b', workflowsDir: 'other/workflows' },
+      ],
+    });
+    expect(result.dir).toBe('/repo/.github/workflows');
+    expect(result.warnings).toHaveLength(1);
+    const warning = result.warnings[0]!;
+    expect(warning).toContain('apps/a');
+    expect(warning).toContain('apps/b');
+    expect(warning).toContain('--workflows-dir');
+  });
+
+  test('partial declaration (not ALL apps) falls back to the default and warns', () => {
+    const result = resolveMatrixWorkflowsDir({
+      gitRoot,
+      apps: [{ dir: 'apps/a', workflowsDir: 'ci/workflows' }, { dir: 'apps/b' }],
+    });
+    expect(result.dir).toBe('/repo/.github/workflows');
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain('apps/a');
+    expect(result.warnings[0]).toContain('--workflows-dir');
+  });
+
+  test('flag wins over a unanimous value (resolved against gitRoot), no warning', () => {
+    const result = resolveMatrixWorkflowsDir({
+      gitRoot,
+      flag: 'custom-workflows',
+      apps: [
+        { dir: 'apps/a', workflowsDir: 'ci/workflows' },
+        { dir: 'apps/b', workflowsDir: 'ci/workflows' },
+      ],
+    });
+    expect(result.dir).toBe('/repo/custom-workflows');
+    expect(result.warnings).toEqual([]);
+  });
+
+  test('flag wins over divergent values, no warning', () => {
+    const result = resolveMatrixWorkflowsDir({
+      gitRoot,
+      flag: '/elsewhere/workflows',
+      apps: [
+        { dir: 'apps/a', workflowsDir: 'ci/workflows' },
+        { dir: 'apps/b', workflowsDir: 'other/workflows' },
+      ],
+    });
+    expect(result.dir).toBe('/elsewhere/workflows');
+    expect(result.warnings).toEqual([]);
   });
 });
 

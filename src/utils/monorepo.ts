@@ -84,3 +84,66 @@ export function resolveWorkflowsDir(input: ResolveWorkflowsDirInput): string {
   if (configValue) return resolve(cwd, configValue);
   return join(gitRoot ?? cwd, '.github', 'workflows');
 }
+
+export interface MatrixWorkflowsDirApp {
+  /** App directory relative to the git root (posix separators). */
+  dir: string;
+  /** The app's `ci.workflowsDir`, when declared. */
+  workflowsDir?: string;
+}
+
+export interface ResolveMatrixWorkflowsDirInput {
+  gitRoot: string;
+  /** Value of `--workflows-dir`; wins over everything. */
+  flag?: string;
+  apps: MatrixWorkflowsDirApp[];
+}
+
+export interface MatrixWorkflowsDirResult {
+  /** Absolute directory the matrix workflow file is emitted into. */
+  dir: string;
+  /** Warnings about ignored per-app `ci.workflowsDir` values, for the caller to print. */
+  warnings: string[];
+}
+
+/**
+ * Directory the single `--matrix` workflow file is emitted into.
+ *
+ * The matrix file is one file shared by N apps, so per-app `ci.workflowsDir`
+ * values cannot apply individually. Precedence:
+ *   1. `--workflows-dir` flag (resolved against the git root) — wins over everything.
+ *   2. Unanimity: when EVERY discovered app declares the SAME `ci.workflowsDir`
+ *      value, that value is used (resolved against the git root).
+ *   3. Default: `<gitRoot>/.github/workflows`.
+ * Divergent or partial declarations fall back to the default with a warning
+ * naming the apps whose value was ignored — no merge semantics are invented.
+ */
+export function resolveMatrixWorkflowsDir(
+  input: ResolveMatrixWorkflowsDirInput,
+): MatrixWorkflowsDirResult {
+  const { gitRoot, flag, apps } = input;
+  if (flag) return { dir: resolve(gitRoot, flag), warnings: [] };
+
+  const declared = apps.filter(
+    (app): app is MatrixWorkflowsDirApp & { workflowsDir: string } =>
+      app.workflowsDir !== undefined,
+  );
+  if (declared.length === 0) {
+    return { dir: join(gitRoot, '.github', 'workflows'), warnings: [] };
+  }
+
+  const values = new Set(declared.map((app) => app.workflowsDir));
+  if (declared.length === apps.length && values.size === 1) {
+    return { dir: resolve(gitRoot, declared[0]!.workflowsDir), warnings: [] };
+  }
+
+  const ignored = declared
+    .map((app) => `${app.dir === '' ? '.' : app.dir} (${app.workflowsDir})`)
+    .join(', ');
+  return {
+    dir: join(gitRoot, '.github', 'workflows'),
+    warnings: [
+      `Matrix mode ignores per-app ci.workflowsDir unless every app declares the same value. Ignored: ${ignored}. Using the default <git root>/.github/workflows — pass --workflows-dir to override.`,
+    ],
+  };
+}

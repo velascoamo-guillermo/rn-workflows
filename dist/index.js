@@ -619,6 +619,26 @@ function resolveWorkflowsDir(input) {
     return resolve2(cwd, configValue);
   return join2(gitRoot ?? cwd, ".github", "workflows");
 }
+function resolveMatrixWorkflowsDir(input) {
+  const { gitRoot, flag, apps } = input;
+  if (flag)
+    return { dir: resolve2(gitRoot, flag), warnings: [] };
+  const declared = apps.filter((app) => app.workflowsDir !== undefined);
+  if (declared.length === 0) {
+    return { dir: join2(gitRoot, ".github", "workflows"), warnings: [] };
+  }
+  const values = new Set(declared.map((app) => app.workflowsDir));
+  if (declared.length === apps.length && values.size === 1) {
+    return { dir: resolve2(gitRoot, declared[0].workflowsDir), warnings: [] };
+  }
+  const ignored = declared.map((app) => `${app.dir === "" ? "." : app.dir} (${app.workflowsDir})`).join(", ");
+  return {
+    dir: join2(gitRoot, ".github", "workflows"),
+    warnings: [
+      `Matrix mode ignores per-app ci.workflowsDir unless every app declares the same value. Ignored: ${ignored}. Using the default <git root>/.github/workflows — pass --workflows-dir to override.`
+    ]
+  };
+}
 
 // src/commands/generate.ts
 function detectPackageManagerAt(dir) {
@@ -694,11 +714,16 @@ function runMatrix(args) {
     if ((slugCounts.get(app.slug) ?? 0) > 1 && app.dir !== "")
       app.slug = slugify(app.dir);
   }
-  const workflowsDir = resolveWorkflowsDir({
-    cwd: gitRoot,
+  const { dir: workflowsDir, warnings: workflowsDirWarnings } = resolveMatrixWorkflowsDir({
     gitRoot,
-    ...args.workflowsDirFlag ? { flag: args.workflowsDirFlag } : {}
+    ...args.workflowsDirFlag ? { flag: args.workflowsDirFlag } : {},
+    apps: apps.map((app) => ({
+      dir: app.dir,
+      ...app.config.workflowsDir ? { workflowsDir: app.config.workflowsDir } : {}
+    }))
   });
+  for (const warning of workflowsDirWarnings)
+    p2.log.warn(warning);
   const packageManager = detectPackageManager(gitRoot, ...apps.map((app) => join3(gitRoot, app.dir)));
   p2.log.info(`Matrix mode: ${apps.length} app(s) — ${apps.map((app) => app.slug).join(", ")}`);
   const file = generateMatrixWorkflow(apps, { packageManager, workflowsDir });
@@ -1438,7 +1463,7 @@ async function handleRemoveDevice() {
     p6.log.error("remove_device failed. Make sure Apple credentials are configured.");
   }
 }
-async function handleViewProfiles(cwd) {
+async function handleViewProfiles(_cwd) {
   let matchGitUrl = process.env["MATCH_GIT_URL"];
   if (!matchGitUrl) {
     matchGitUrl = await promptText("Match repo URL (MATCH_GIT_URL)", { placeholder: "https://github.com/owner/match-repo.git" });

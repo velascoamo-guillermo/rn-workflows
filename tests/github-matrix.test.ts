@@ -75,6 +75,7 @@ interface ReleaseLeg {
   platform: string;
   runsOn: string;
   ota: boolean;
+  otaUpload: boolean;
   otaServer: string;
   otaChannel: string;
 }
@@ -222,6 +223,60 @@ describe('generateMatrixWorkflow', () => {
     expect(ota.otaServer).toBe('https://ota.shipyard.dev');
     expect(ota.otaChannel).toBe('production');
     expect(plain.ota).toBe(false);
+  });
+
+  test('platform:all with ota marks exactly one leg per app×profile as the uploader — the android one', () => {
+    const { parsed } = renderMatrix();
+    const legs = legsFromEnv<ReleaseLeg>(parsed, 'RELEASE_LEGS');
+    const pawlogLegs = legs.filter((l) => l.app === 'pawlog' && l.profile === 'production');
+    expect(pawlogLegs).toHaveLength(2);
+    const uploaders = pawlogLegs.filter((l) => l.otaUpload);
+    expect(uploaders).toHaveLength(1);
+    expect(uploaders[0]!.platform).toBe('android');
+    // every ota leg still carries the ota flag so fingerprint skip logic runs per platform
+    expect(pawlogLegs.every((l) => l.ota)).toBe(true);
+  });
+
+  test('single-platform ota profile keeps the upload on its only leg', () => {
+    const iosOnlyOta: Config = {
+      project: { type: 'expo', bundleId: 'com.test.solo', packageName: 'com.test.solo' },
+      ci: 'github-actions',
+      build: {
+        production: {
+          platform: 'ios',
+          distribution: 'testflight',
+          ota: { server: 'https://ota.solo.dev', channel: 'production' },
+        },
+      },
+    };
+    const { parsed } = renderMatrix([{ dir: '', slug: 'solo', config: iosOnlyOta }]);
+    const legs = legsFromEnv<ReleaseLeg>(parsed, 'RELEASE_LEGS');
+    expect(legs).toHaveLength(1);
+    expect(legs[0]!.platform).toBe('ios');
+    expect(legs[0]!.ota).toBe(true);
+    expect(legs[0]!.otaUpload).toBe(true);
+  });
+
+  test('non-ota legs never carry the upload flag', () => {
+    const { parsed } = renderMatrix();
+    const legs = legsFromEnv<ReleaseLeg>(parsed, 'RELEASE_LEGS');
+    const plain = legs.find((l) => l.app === 'vaulty')!;
+    expect(plain.ota).toBe(false);
+    expect(plain.otaUpload).toBe(false);
+  });
+
+  test('OTA export/package/upload steps gate on matrix.otaUpload; fingerprint steps keep matrix.ota', () => {
+    const { parsed } = renderMatrix();
+    const release = parsed.jobs['release']!;
+    const gated = ['Export JS bundle (OTA)', 'Package bundle (OTA)', 'Upload OTA update'];
+    for (const name of gated) {
+      const step = release.steps.find((s) => s.name === name);
+      expect(step).toBeDefined();
+      expect(String(step!.if)).toContain('matrix.otaUpload');
+    }
+    const cache = release.steps.find((s) => s.id === 'fp-cache')!;
+    expect(String(cache.if)).toContain('matrix.ota');
+    expect(String(cache.if)).not.toContain('matrix.otaUpload');
   });
 
   test('quality matrix has one leg per app with checks enabled', () => {

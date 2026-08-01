@@ -525,7 +525,10 @@ function generateMatrixWorkflow(apps, options = {}) {
       });
     }
     for (const [profileName, profile] of Object.entries(app.config.build)) {
-      for (const platform of platformsFor(profile.platform)) {
+      const platforms = platformsFor(profile.platform);
+      const hasOtaProfile = profile.ota !== undefined;
+      const uploadPlatform = platforms.includes("android") ? "android" : platforms[0];
+      for (const platform of platforms) {
         if (platform === "ios")
           hasIos = true;
         for (const secret of secretsFor(platform, profile.distribution)) {
@@ -537,7 +540,8 @@ function generateMatrixWorkflow(apps, options = {}) {
           profile: profileName,
           platform,
           runsOn: platform === "ios" ? "macos-latest" : "ubuntu-latest",
-          ota: profile.ota !== undefined,
+          ota: hasOtaProfile,
+          otaUpload: hasOtaProfile && platform === uploadPlatform,
           otaServer: profile.ota?.server ?? "",
           otaChannel: profile.ota?.channel ?? ""
         });

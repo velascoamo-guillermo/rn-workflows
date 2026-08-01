@@ -78,6 +78,14 @@ describe('generateGithubActions with OTA', () => {
     expect(content).not.toContain('ota-update:');
   });
 
+  test('platform:all uploads the universal bundle exactly once per run', () => {
+    // OTA upload runs once per app: `expo export --platform all` produces a
+    // universal bundle, so a second per-platform upload would be a duplicate.
+    const { content } = generateGithubActions(baseOtaConfig)[0]!;
+    expect(content.match(/Upload OTA update/g)).toHaveLength(1);
+    expect(content.match(/npx expo export --platform all/g)).toHaveLength(1);
+  });
+
   test('output matches snapshot', () => {
     const { content } = generateGithubActions(baseOtaConfig)[0]!;
     expect(content).toMatchSnapshot();

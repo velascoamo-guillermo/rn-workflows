@@ -1,12 +1,8 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "ignorePatterns": ["src/templates/**", "dist/**", "docs/**"],
-  "overrides": [
-    {
-      "files": ["tests/**/*.ts"],
-      "rules": {
-        "no-unused-vars": "off"
-      }
-    }
+  "ignorePatterns": [
+    "src/templates/**",
+    "dist/**",
+    "docs/**"
   ]
 }

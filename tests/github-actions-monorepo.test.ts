@@ -75,7 +75,7 @@ describe('generateGithubActions in a monorepo', () => {
     };
     const { content } = generateGithubActions(config, monorepoOptions)[0]!;
     const parsed = parseWorkflow(content);
-    for (const [id, job] of Object.entries(parsed.jobs)) {
+    for (const job of Object.values(parsed.jobs)) {
       const checksOut = job.steps.some((s) => s.uses?.startsWith('actions/checkout'));
       expect(checksOut).toBe(true);
       expect(job.defaults?.run?.['working-directory']).toBe('apps/mobile');
@@ -156,7 +156,7 @@ describe('generateGithubActions in a monorepo', () => {
     test('sets per-job working-directory only on jobs that check out code', () => {
       const { content } = generateGithubActions(otaConfig, monorepoOptions)[0]!;
       const parsed = parseWorkflow(content);
-      for (const [id, job] of Object.entries(parsed.jobs)) {
+      for (const job of Object.values(parsed.jobs)) {
         const checksOut = job.steps.some((s) => s.uses?.startsWith('actions/checkout'));
         if (checksOut) {
           expect(job.defaults?.run?.['working-directory']).toBe('apps/mobile');

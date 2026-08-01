@@ -27,6 +27,13 @@ export interface GithubActionsOptions {
   appDir?: string;
   /** Filename prefix to avoid collisions between apps in the same monorepo. */
   appSlug?: string;
+  /**
+   * Posix-relative path from the git root to the directory workflow files are
+   * emitted into. Used to include each workflow file's own path in its
+   * `on.push.paths` filter (so edits to the workflow itself trigger a run).
+   * Default: `.github/workflows`.
+   */
+  workflowsPathFromRoot?: string;
 }
 
 export function generateGithubActions(
@@ -37,6 +44,8 @@ export function generateGithubActions(
   const workflowsDir = options.workflowsDir ?? '.github/workflows';
   const appDir = options.appDir ?? '';
   const slugPrefix = options.appSlug ? `${options.appSlug}-` : '';
+  const workflowsPathFromRoot = options.workflowsPathFromRoot ?? '.github/workflows';
+  const extraPaths = config.extraPaths ?? [];
   const files: GeneratedFile[] = [];
 
   for (const [name, profile] of Object.entries(config.build)) {
@@ -53,6 +62,7 @@ export function generateGithubActions(
     const checks = config.checks ?? {};
     const hasChecks = checks.test || checks.lint || checks.typecheck;
 
+    const filename = `rn-${slugPrefix}${name}.yml`;
     const templateData = {
       workflowName: `rn-workflows • ${name}`,
       branch: branchFor(name),
@@ -61,6 +71,8 @@ export function generateGithubActions(
       checks,
       hasChecks,
       appDir,
+      extraPaths,
+      selfPath: `${workflowsPathFromRoot}/${filename}`,
     };
 
     const templateName = profile.ota
@@ -72,7 +84,7 @@ export function generateGithubActions(
       ...(profile.ota ? { ota: profile.ota } : {}),
     });
 
-    files.push({ path: `${workflowsDir}/rn-${slugPrefix}${name}.yml`, content });
+    files.push({ path: `${workflowsDir}/${filename}`, content });
   }
 
   return files;

@@ -56,6 +56,52 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
+export interface SlugCandidate {
+  /** Git-root-relative posix dir; '' for a root-level app. */
+  dir: string;
+  /** Preferred slug, derived from the directory basename. */
+  baseSlug: string;
+}
+
+/**
+ * Final unique slug per app, parallel to the input array.
+ *
+ * Keeps the basename-derived slug when it is unique across all discovered
+ * apps; falls back to the full path-derived slug (`apps/a/mobile` →
+ * `apps-a-mobile`) on collision so two apps named `mobile` cannot silently
+ * overwrite each other's matrix leg; throws when even path-derived slugs
+ * collide — there is no sensible automatic disambiguation left.
+ */
+export function assignUniqueSlugs(apps: SlugCandidate[]): string[] {
+  const baseCounts = new Map<string, number>();
+  for (const app of apps) {
+    baseCounts.set(app.baseSlug, (baseCounts.get(app.baseSlug) ?? 0) + 1);
+  }
+
+  // Root-level apps ('') have no path to derive from — they keep the base slug.
+  const slugs = apps.map((app) =>
+    (baseCounts.get(app.baseSlug) ?? 0) > 1 && app.dir !== ''
+      ? slugify(app.dir)
+      : app.baseSlug,
+  );
+
+  const dirsBySlug = new Map<string, string[]>();
+  slugs.forEach((slug, i) => {
+    const dir = apps[i]!.dir === '' ? '.' : apps[i]!.dir;
+    dirsBySlug.set(slug, [...(dirsBySlug.get(slug) ?? []), dir]);
+  });
+  const collisions = [...dirsBySlug.entries()].filter(([, dirs]) => dirs.length > 1);
+  if (collisions.length > 0) {
+    const detail = collisions
+      .map(([slug, dirs]) => `"${slug}" (from ${dirs.join(', ')})`)
+      .join('; ');
+    throw new Error(
+      `App slugs collide even after path derivation: ${detail}. Rename the app directories so they produce distinct slugs.`,
+    );
+  }
+  return slugs;
+}
+
 /**
  * Relative path from `from` to `to` using posix separators.
  * Empty string when both point at the same directory.

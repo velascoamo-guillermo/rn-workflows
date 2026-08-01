@@ -78,6 +78,9 @@ export type Checks = z.infer<typeof ChecksSchema>;
 export const CiObjectSchema = z.object({
   provider: CiSchema,
   workflowsDir: z.string().min(1, 'workflowsDir cannot be empty').optional(),
+  extraPaths: z
+    .array(z.string().min(1, 'extraPaths entries cannot be empty'))
+    .optional(),
 });
 
 export interface Config {
@@ -87,6 +90,11 @@ export interface Config {
   build: Record<string, BuildProfile>;
   /** From `ci.workflowsDir` — overrides where GitHub workflow files are emitted. */
   workflowsDir?: string;
+  /**
+   * From `ci.extraPaths` — git-root-relative globs appended to the
+   * `on.push.paths` filter of monorepo per-app workflows (shared packages).
+   */
+  extraPaths?: string[];
 }
 
 export const ConfigSchema = z
@@ -139,5 +147,6 @@ export const ConfigSchema = z
     };
     if (cfg.checks !== undefined) out.checks = cfg.checks;
     if (ci.workflowsDir !== undefined) out.workflowsDir = ci.workflowsDir;
+    if (ci.extraPaths !== undefined) out.extraPaths = ci.extraPaths;
     return out;
   });

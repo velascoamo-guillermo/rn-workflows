@@ -83,7 +83,8 @@ var ChecksSchema = z.object({
 });
 var CiObjectSchema = z.object({
   provider: CiSchema,
-  workflowsDir: z.string().min(1, "workflowsDir cannot be empty").optional()
+  workflowsDir: z.string().min(1, "workflowsDir cannot be empty").optional(),
+  extraPaths: z.array(z.string().min(1, "extraPaths entries cannot be empty")).optional()
 });
 var ConfigSchema = z.object({
   project: ProjectSchema,
@@ -132,6 +133,8 @@ var ConfigSchema = z.object({
     out.checks = cfg.checks;
   if (ci.workflowsDir !== undefined)
     out.workflowsDir = ci.workflowsDir;
+  if (ci.extraPaths !== undefined)
+    out.extraPaths = ci.extraPaths;
   return out;
 });
 
@@ -438,6 +441,8 @@ function generateGithubActions(config, options = {}) {
   const workflowsDir = options.workflowsDir ?? ".github/workflows";
   const appDir = options.appDir ?? "";
   const slugPrefix = options.appSlug ? `${options.appSlug}-` : "";
+  const workflowsPathFromRoot = options.workflowsPathFromRoot ?? ".github/workflows";
+  const extraPaths = config.extraPaths ?? [];
   const files = [];
   for (const [name, profile] of Object.entries(config.build)) {
     const platforms = platformsFor(profile.platform);
@@ -451,6 +456,7 @@ function generateGithubActions(config, options = {}) {
     }));
     const checks = config.checks ?? {};
     const hasChecks = checks.test || checks.lint || checks.typecheck;
+    const filename = `rn-${slugPrefix}${name}.yml`;
     const templateData = {
       workflowName: `rn-workflows • ${name}`,
       branch: branchFor(name),
@@ -458,14 +464,16 @@ function generateGithubActions(config, options = {}) {
       packageManager,
       checks,
       hasChecks,
-      appDir
+      appDir,
+      extraPaths,
+      selfPath: `${workflowsPathFromRoot}/${filename}`
     };
     const templateName = profile.ota ? "github/workflow-smart.ejs" : "github/workflow.ejs";
     const content = renderTemplate(templateName, {
       ...templateData,
       ...profile.ota ? { ota: profile.ota } : {}
     });
-    files.push({ path: `${workflowsDir}/rn-${slugPrefix}${name}.yml`, content });
+    files.push({ path: `${workflowsDir}/${filename}`, content });
   }
   return files;
 }
@@ -612,6 +620,24 @@ function findGitRoot(cwd) {
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
+function assignUniqueSlugs(apps) {
+  const baseCounts = new Map;
+  for (const app of apps) {
+    baseCounts.set(app.baseSlug, (baseCounts.get(app.baseSlug) ?? 0) + 1);
+  }
+  const slugs = apps.map((app) => (baseCounts.get(app.baseSlug) ?? 0) > 1 && app.dir !== "" ? slugify(app.dir) : app.baseSlug);
+  const dirsBySlug = new Map;
+  slugs.forEach((slug, i) => {
+    const dir = apps[i].dir === "" ? "." : apps[i].dir;
+    dirsBySlug.set(slug, [...dirsBySlug.get(slug) ?? [], dir]);
+  });
+  const collisions = [...dirsBySlug.entries()].filter(([, dirs]) => dirs.length > 1);
+  if (collisions.length > 0) {
+    const detail = collisions.map(([slug, dirs]) => `"${slug}" (from ${dirs.join(", ")})`).join("; ");
+    throw new Error(`App slugs collide even after path derivation: ${detail}. Rename the app directories so they produce distinct slugs.`);
+  }
+  return slugs;
+}
 function toPosixRelative(from, to) {
   return relative(from, to).split(sep).join("/");
 }
@@ -711,12 +737,13 @@ function runMatrix(args) {
     p2.log.error("No github-actions configs discovered — nothing to generate.");
     process.exit(1);
   }
-  const slugCounts = new Map;
-  for (const app of apps)
-    slugCounts.set(app.slug, (slugCounts.get(app.slug) ?? 0) + 1);
-  for (const app of apps) {
-    if ((slugCounts.get(app.slug) ?? 0) > 1 && app.dir !== "")
-      app.slug = slugify(app.dir);
+  try {
+    const slugs = assignUniqueSlugs(apps.map((app) => ({ dir: app.dir, baseSlug: app.slug })));
+    for (const [i, app] of apps.entries())
+      app.slug = slugs[i];
+  } catch (err) {
+    p2.log.error(err.message);
+    process.exit(1);
   }
   const { dir: workflowsDir, warnings: workflowsDirWarnings } = resolveMatrixWorkflowsDir({
     gitRoot,
@@ -813,7 +840,8 @@ var generate_default = defineCommand2({
     const githubOptions = {
       packageManager,
       workflowsDir,
-      ...appDir ? { appDir, appSlug: slugify(basename(appDirAbs)) } : {}
+      ...appDir ? { appDir, appSlug: slugify(basename(appDirAbs)) } : {},
+      ...gitRoot ? { workflowsPathFromRoot: toPosixRelative(gitRoot, workflowsDir) } : {}
     };
     const files = [
       ...generateFastlane(config, { packageManager }),

@@ -108,6 +108,16 @@ ci:
   workflowsDir: ci/workflows
 ```
 
+Per-app workflows in a monorepo trigger only on changes under the app directory. When the app also depends on shared code, declare `ci.extraPaths` — git-root-relative globs appended to the workflow's `on.push.paths` filter (the emitted workflow file's own path is always included, so editing the workflow re-triggers it):
+
+```yaml
+ci:
+  provider: github-actions
+  extraPaths:
+    - packages/shared/**
+    - package.json
+```
+
 ## Requirements
 
 - Node.js `>=20`

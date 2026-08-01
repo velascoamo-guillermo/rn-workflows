@@ -62,6 +62,60 @@ build:
     expect(cfg.workflowsDir).toBeUndefined();
   });
 
+  it('parses ci object with extraPaths', () => {
+    const raw = `
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+ci:
+  provider: github-actions
+  extraPaths:
+    - packages/shared/**
+    - package.json
+build:
+  preview:
+    platform: android
+    distribution: firebase
+`;
+    const cfg = parseConfig(raw);
+    expect(cfg.extraPaths).toEqual(['packages/shared/**', 'package.json']);
+  });
+
+  it('leaves extraPaths undefined when ci object omits it', () => {
+    const raw = `
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+ci:
+  provider: github-actions
+build:
+  preview:
+    platform: android
+    distribution: firebase
+`;
+    expect(parseConfig(raw).extraPaths).toBeUndefined();
+  });
+
+  it('rejects empty extraPaths entries', () => {
+    const raw = `
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+ci:
+  provider: github-actions
+  extraPaths:
+    - ''
+build:
+  preview:
+    platform: android
+    distribution: firebase
+`;
+    expect(() => parseConfig(raw)).toThrow(ConfigError);
+  });
+
   it('rejects ci object with invalid provider', () => {
     const raw = `
 project:

@@ -93,4 +93,37 @@ describe('generate --matrix workflowsDir resolution (CLI)', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  describe('slug uniqueness', () => {
+    function makeCollidingMonorepo(dirs: [string, string]): string {
+      const root = mkdtempSync(join(tmpdir(), 'rnwf-matrix-slugs-'));
+      execFileSync('git', ['init', '-q'], { cwd: root });
+      for (const [i, dir] of dirs.entries()) {
+        mkdirSync(join(root, dir), { recursive: true });
+        writeFileSync(join(root, dir, 'rn-workflows.yml'), appYaml(`com.test.app${i}`));
+      }
+      return root;
+    }
+
+    test('duplicate basenames fall back to path-derived slugs in the matrix', () => {
+      const root = makeCollidingMonorepo(['apps/a/mobile', 'apps/b/mobile']);
+      try {
+        const out = runMatrix(root);
+        expect(out).toContain('apps-a-mobile');
+        expect(out).toContain('apps-b-mobile');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    test('fails loudly when even path-derived slugs collide', () => {
+      const root = makeCollidingMonorepo(['apps/a-b', 'apps/a_b']);
+      try {
+        expect(() => runMatrix(root)).toThrow();
+        expect(existsSync(join(root, '.github', 'workflows', MATRIX_WORKFLOW_FILENAME))).toBe(false);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  });
 });

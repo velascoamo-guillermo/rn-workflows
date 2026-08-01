@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import {
+  assignUniqueSlugs,
   findGitRoot,
   resolveMatrixWorkflowsDir,
   resolveWorkflowsDir,
@@ -136,6 +137,44 @@ describe('slugify', () => {
   test('replaces separators with dashes and trims', () => {
     expect(slugify('My App_v2')).toBe('my-app-v2');
     expect(slugify('--weird--')).toBe('weird');
+  });
+});
+
+describe('assignUniqueSlugs', () => {
+  test('keeps basename-derived slugs when unique across apps', () => {
+    expect(
+      assignUniqueSlugs([
+        { dir: 'apps/pawlog', baseSlug: 'pawlog' },
+        { dir: 'apps/vaulty', baseSlug: 'vaulty' },
+      ]),
+    ).toEqual(['pawlog', 'vaulty']);
+  });
+
+  test('falls back to path-derived slugs on basename collision', () => {
+    expect(
+      assignUniqueSlugs([
+        { dir: 'apps/a/mobile', baseSlug: 'mobile' },
+        { dir: 'apps/b/mobile', baseSlug: 'mobile' },
+      ]),
+    ).toEqual(['apps-a-mobile', 'apps-b-mobile']);
+  });
+
+  test('root-level app keeps its base slug during collision fallback', () => {
+    expect(
+      assignUniqueSlugs([
+        { dir: '', baseSlug: 'mobile' },
+        { dir: 'apps/mobile', baseSlug: 'mobile' },
+      ]),
+    ).toEqual(['mobile', 'apps-mobile']);
+  });
+
+  test('throws naming the colliding dirs when path-derived slugs still collide', () => {
+    expect(() =>
+      assignUniqueSlugs([
+        { dir: 'apps/a-b', baseSlug: 'a-b' },
+        { dir: 'apps/a_b', baseSlug: 'a-b' },
+      ]),
+    ).toThrow(/apps\/a-b.*apps\/a_b|apps-a-b/);
   });
 });
 

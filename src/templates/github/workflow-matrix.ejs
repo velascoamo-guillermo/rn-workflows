@@ -137,16 +137,20 @@ jobs:
           path: ${{ matrix.dir }}/.rn-fingerprint
           lookup-only: true
 
+<%# OTA upload runs once per app; platform:all exports a universal bundle,
+    so only the single leg flagged otaUpload (the cheapest one) exports and
+    uploads it. Fingerprint steps above stay per-leg (matrix.ota) so every
+    platform can still skip its native build on a cache hit. -%>
       - name: Export JS bundle (OTA)
-        if: ${{ matrix.ota && steps.fp-cache.outputs.cache-hit == 'true' }}
+        if: ${{ matrix.otaUpload && steps.fp-cache.outputs.cache-hit == 'true' }}
         run: npx expo export --platform all --output-dir dist
 
       - name: Package bundle (OTA)
-        if: ${{ matrix.ota && steps.fp-cache.outputs.cache-hit == 'true' }}
+        if: ${{ matrix.otaUpload && steps.fp-cache.outputs.cache-hit == 'true' }}
         run: cd dist && zip -r ../bundle.zip .
 
       - name: Upload OTA update
-        if: ${{ matrix.ota && steps.fp-cache.outputs.cache-hit == 'true' }}
+        if: ${{ matrix.otaUpload && steps.fp-cache.outputs.cache-hit == 'true' }}
         run: |
           curl -X POST ${{ matrix.otaServer }}/api/upload \
             -F "file=@bundle.zip" \

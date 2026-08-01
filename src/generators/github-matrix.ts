@@ -28,7 +28,15 @@ interface ReleaseLeg {
   profile: string;
   platform: 'android' | 'ios';
   runsOn: string;
+  /** Leg participates in OTA fingerprint/skip logic. */
   ota: boolean;
+  /**
+   * Leg performs the OTA export + upload. Exactly one leg per app × profile:
+   * `expo export --platform all` produces a universal bundle, so uploading it
+   * from every platform leg would push the same bundle twice to one channel.
+   * The cheapest leg (android/ubuntu) is chosen when the profile targets both.
+   */
+  otaUpload: boolean;
   otaServer: string;
   otaChannel: string;
 }
@@ -84,7 +92,12 @@ export function generateMatrixWorkflow(
     }
 
     for (const [profileName, profile] of Object.entries(app.config.build)) {
-      for (const platform of platformsFor(profile.platform)) {
+      const platforms = platformsFor(profile.platform);
+      const hasOtaProfile = profile.ota !== undefined;
+      // OTA upload runs once per app × profile; platform:all exports a
+      // universal bundle. Prefer the android leg (ubuntu, cheapest runner).
+      const uploadPlatform = platforms.includes('android') ? 'android' : platforms[0];
+      for (const platform of platforms) {
         if (platform === 'ios') hasIos = true;
         for (const secret of secretsFor(platform, profile.distribution)) {
           secretUnion.add(secret);
@@ -95,7 +108,8 @@ export function generateMatrixWorkflow(
           profile: profileName,
           platform,
           runsOn: platform === 'ios' ? 'macos-latest' : 'ubuntu-latest',
-          ota: profile.ota !== undefined,
+          ota: hasOtaProfile,
+          otaUpload: hasOtaProfile && platform === uploadPlatform,
           otaServer: profile.ota?.server ?? '',
           otaChannel: profile.ota?.channel ?? '',
         });

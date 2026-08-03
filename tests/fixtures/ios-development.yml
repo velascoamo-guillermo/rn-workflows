@@ -1,0 +1,14 @@
+project:
+  type: bare
+  bundleId: com.gvelasco.pawlog
+  packageName: com.gvelasco.pawlog
+  scheme: Pawlog
+
+ci: github-actions
+
+build:
+  devbuild:
+    platform: ios
+    distribution: firebase
+    ios:
+      exportMethod: development

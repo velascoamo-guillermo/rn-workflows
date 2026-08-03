@@ -21,6 +21,7 @@ import {
   slugify,
   toPosixRelative,
 } from '../utils/monorepo.ts';
+import { detectExpoScheme } from '../utils/expo.ts';
 
 function detectPackageManagerAt(dir: string): 'yarn' | 'npm' | 'bun' | null {
   if (existsSync(resolve(dir, 'bun.lock')) || existsSync(resolve(dir, 'bun.lockb'))) return 'bun';
@@ -213,6 +214,20 @@ export default defineCommand({
     const appDirAbs = resolve(String(args.cwd));
     const packageManager = detectPackageManager(appDirAbs);
 
+    // `expo prebuild` names the Xcode project after `expo.name`, not the bundle
+    // id — detect it unless the config pins `project.scheme` explicitly.
+    const detectedScheme =
+      config.project.scheme === undefined && config.project.type === 'expo'
+        ? detectExpoScheme(appDirAbs)
+        : undefined;
+    if (detectedScheme) {
+      p.log.info(`Detected Xcode scheme "${detectedScheme}" from app.json`);
+    } else if (config.project.scheme === undefined && config.project.type === 'expo') {
+      p.log.warn(
+        'Could not read expo.name (dynamic app.config.js?). Falling back to the bundle id — set project.scheme in rn-workflows.yml if the Xcode scheme differs.',
+      );
+    }
+
     // Workflow files must live at the git root — GitHub only reads
     // .github/workflows there. Everything else stays in the app dir.
     const gitRoot = findGitRoot(appDirAbs);
@@ -232,7 +247,7 @@ export default defineCommand({
     };
 
     const files: GeneratedFile[] = [
-      ...generateFastlane(config, { packageManager }),
+      ...generateFastlane(config, { packageManager, scheme: detectedScheme }),
       ...(config.ci === 'github-actions'
         ? generateGithubActions(config, githubOptions)
         : generateGitlab(config)),

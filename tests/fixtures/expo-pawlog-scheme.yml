@@ -1,0 +1,16 @@
+project:
+  type: expo
+  bundleId: com.gvelasco.pawlog
+  packageName: com.gvelasco.pawlog
+  scheme: Pawlog
+
+ci: github-actions
+
+build:
+  production:
+    platform: all
+    distribution: store
+    android:
+      buildType: aab
+    ios:
+      exportMethod: app-store

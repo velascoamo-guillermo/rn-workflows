@@ -20,9 +20,52 @@ interface IosProfileView {
   description: string;
   targets: string[];
   exportMethod: string;
-  matchType: string;
+  matchType: MatchType;
+  provisioningProfileName: string;
+  codeSignIdentity: string;
   xcWorkspace: string;
   xcScheme: string;
+}
+
+type MatchType = 'appstore' | 'adhoc' | 'development';
+
+/** `match(type: X)` installs a profile literally named `match <Name> <bundleId>`. */
+const MATCH_PROFILE_LABEL: Record<MatchType, string> = {
+  appstore: 'AppStore',
+  adhoc: 'AdHoc',
+  development: 'Development',
+};
+
+/** Modern certificate names — `iPhone Distribution` is the legacy spelling. */
+const CODE_SIGN_IDENTITY: Record<MatchType, string> = {
+  appstore: 'Apple Distribution',
+  adhoc: 'Apple Distribution',
+  development: 'Apple Development',
+};
+
+export function matchTypeFor(exportMethod: string): MatchType {
+  if (exportMethod === 'ad-hoc') return 'adhoc';
+  if (exportMethod === 'development') return 'development';
+  return 'appstore';
+}
+
+export function provisioningProfileName(matchType: MatchType, bundleId: string): string {
+  return `match ${MATCH_PROFILE_LABEL[matchType]} ${bundleId}`;
+}
+
+export interface FastlaneOptions {
+  packageManager?: 'yarn' | 'npm' | 'bun';
+  /** Auto-detected Xcode scheme, used only when `project.scheme` is unset. */
+  scheme?: string;
+}
+
+export function resolveScheme(config: Config, detectedScheme?: string): string {
+  return (
+    config.project.scheme ??
+    detectedScheme ??
+    config.project.bundleId.split('.').pop() ??
+    'App'
+  );
 }
 
 function toAndroidView(name: string, profile: BuildProfile): AndroidProfileView {
@@ -41,27 +84,34 @@ function toAndroidView(name: string, profile: BuildProfile): AndroidProfileView 
   };
 }
 
-function toIosView(name: string, profile: BuildProfile, bundleId: string): IosProfileView {
+function toIosView(
+  name: string,
+  profile: BuildProfile,
+  bundleId: string,
+  scheme: string,
+): IosProfileView {
   const exportMethod = profile.ios?.exportMethod ?? 'app-store';
   const targets = profile.distribution.split('+').map((s) => s.trim());
-  const matchType = exportMethod === 'app-store' ? 'appstore' : exportMethod === 'ad-hoc' ? 'adhoc' : 'development';
-  const schemeName = bundleId.split('.').pop() ?? 'App';
+  const matchType = matchTypeFor(exportMethod);
   return {
     name,
     description: `Build ${name} (ios)`,
     targets,
     exportMethod,
     matchType,
-    xcWorkspace: schemeName,
-    xcScheme: schemeName,
+    provisioningProfileName: provisioningProfileName(matchType, bundleId),
+    codeSignIdentity: CODE_SIGN_IDENTITY[matchType],
+    xcWorkspace: scheme,
+    xcScheme: scheme,
   };
 }
 
 export function generateFastlane(
   config: Config,
-  options: { packageManager?: 'yarn' | 'npm' | 'bun' } = {},
+  options: FastlaneOptions = {},
 ): GeneratedFile[] {
   const packageManager = options.packageManager ?? 'yarn';
+  const scheme = resolveScheme(config, options.scheme);
   const androidProfiles: AndroidProfileView[] = [];
   const iosProfiles: IosProfileView[] = [];
 
@@ -70,7 +120,7 @@ export function generateFastlane(
       androidProfiles.push(toAndroidView(name, profile));
     }
     if (profile.platform === 'ios' || profile.platform === 'all') {
-      iosProfiles.push(toIosView(name, profile, config.project.bundleId));
+      iosProfiles.push(toIosView(name, profile, config.project.bundleId, scheme));
     }
   }
 
@@ -81,6 +131,7 @@ export function generateFastlane(
   const fastfile = renderTemplate('fastlane/Fastfile.ejs', {
     androidProfiles,
     iosProfiles,
+    defaultPlatform: androidProfiles.length > 0 ? 'android' : 'ios',
     projectType: config.project.type,
     bundleId: config.project.bundleId,
     packageName: config.project.packageName,

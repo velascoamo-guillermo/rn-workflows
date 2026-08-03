@@ -25,7 +25,7 @@ import { createRequire as createRequire2 } from "node:module";
 // src/commands/init.ts
 import { defineCommand } from "citty";
 import { existsSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve as resolve2 } from "node:path";
 import * as p from "@clack/prompts";
 import yaml from "js-yaml";
 
@@ -74,7 +74,8 @@ var BuildProfileSchema = z.object({
 var ProjectSchema = z.object({
   type: ProjectTypeSchema,
   bundleId: z.string().min(1),
-  packageName: z.string().min(1)
+  packageName: z.string().min(1),
+  scheme: z.string().min(1).optional()
 });
 var ChecksSchema = z.object({
   test: z.boolean().optional(),
@@ -138,6 +139,52 @@ var ConfigSchema = z.object({
   return out;
 });
 
+// src/utils/expo.ts
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+function sanitizeSchemeName(name) {
+  return name.replace(/[\W_]+/g, "");
+}
+var APP_CONFIG_FILES = ["app.json", "app.config.json"];
+function detectExpoScheme(cwd) {
+  for (const file of APP_CONFIG_FILES) {
+    let raw;
+    try {
+      raw = readFileSync(resolve(cwd, file), "utf8");
+    } catch {
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    const name = readName(parsed);
+    if (name) {
+      const sanitized = sanitizeSchemeName(name);
+      if (sanitized)
+        return sanitized;
+    }
+  }
+  return;
+}
+function readName(parsed) {
+  if (typeof parsed !== "object" || parsed === null)
+    return;
+  const root = parsed;
+  const expo = root["expo"];
+  if (typeof expo === "object" && expo !== null) {
+    const nested = expo["name"];
+    if (typeof nested === "string" && nested.trim())
+      return nested.trim();
+  }
+  const top = root["name"];
+  if (typeof top === "string" && top.trim())
+    return top.trim();
+  return;
+}
+
 // src/commands/init.ts
 var init_default = defineCommand({
   meta: {
@@ -158,7 +205,7 @@ var init_default = defineCommand({
   },
   async run({ args }) {
     p.intro("rn-workflows init");
-    const outPath = resolve(String(args.cwd), "rn-workflows.yml");
+    const outPath = resolve2(String(args.cwd), "rn-workflows.yml");
     if (existsSync(outPath) && !args.force) {
       p.log.error(`${outPath} already exists. Pass --force to overwrite.`);
       process.exit(1);
@@ -181,6 +228,13 @@ var init_default = defineCommand({
       defaultValue: bundleId
     });
     assertNotCancelled(packageName);
+    const defaultScheme = (projectType === "expo" ? detectExpoScheme(String(args.cwd)) : undefined) ?? bundleId.split(".").pop() ?? "App";
+    const scheme = await p.text({
+      message: "Xcode scheme (ios/<scheme>.xcworkspace)",
+      placeholder: defaultScheme,
+      defaultValue: defaultScheme
+    });
+    assertNotCancelled(scheme);
     const ci = await p.select({
       message: "CI provider",
       options: CI_PROVIDERS.map((c) => ({ value: c, label: c })),
@@ -231,7 +285,7 @@ var init_default = defineCommand({
       };
     }
     const config = {
-      project: { type: projectType, bundleId, packageName },
+      project: { type: projectType, bundleId, packageName, scheme },
       ci,
       checks: { test: true, lint: true, typecheck: true },
       build
@@ -250,12 +304,12 @@ function assertNotCancelled(value) {
 
 // src/commands/generate.ts
 import { defineCommand as defineCommand2 } from "citty";
-import { basename, dirname as dirname3, join as join3, resolve as resolve3 } from "node:path";
+import { basename, dirname as dirname3, join as join3, resolve as resolve4 } from "node:path";
 import { existsSync as existsSync2 } from "node:fs";
 import * as p2 from "@clack/prompts";
 
 // src/config/parser.ts
-import { readFileSync } from "node:fs";
+import { readFileSync as readFileSync2 } from "node:fs";
 import yaml2 from "js-yaml";
 import { ZodError } from "zod";
 class ConfigError extends Error {
@@ -283,7 +337,7 @@ function parseConfig(raw) {
 function loadConfig(path) {
   let raw;
   try {
-    raw = readFileSync(path, "utf8");
+    raw = readFileSync2(path, "utf8");
   } catch (err) {
     throw new ConfigError(`Cannot read config at ${path}: ${err.message}`);
   }
@@ -300,7 +354,7 @@ ${lines.join(`
 }
 
 // src/utils/render.ts
-import { readFileSync as readFileSync2 } from "node:fs";
+import { readFileSync as readFileSync3 } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import ejs from "ejs";
@@ -313,7 +367,7 @@ function resolveTemplate(relPath) {
   ];
   for (const p2 of candidates) {
     try {
-      return readFileSync2(p2, "utf8");
+      return readFileSync3(p2, "utf8");
     } catch {}
   }
   throw new Error(`Template not found: ${relPath}`);
@@ -324,6 +378,29 @@ function renderTemplate(relPath, data) {
 }
 
 // src/generators/fastlane.ts
+var MATCH_PROFILE_LABEL = {
+  appstore: "AppStore",
+  adhoc: "AdHoc",
+  development: "Development"
+};
+var CODE_SIGN_IDENTITY = {
+  appstore: "Apple Distribution",
+  adhoc: "Apple Distribution",
+  development: "Apple Development"
+};
+function matchTypeFor(exportMethod) {
+  if (exportMethod === "ad-hoc")
+    return "adhoc";
+  if (exportMethod === "development")
+    return "development";
+  return "appstore";
+}
+function provisioningProfileName(matchType, bundleId) {
+  return `match ${MATCH_PROFILE_LABEL[matchType]} ${bundleId}`;
+}
+function resolveScheme(config, detectedScheme) {
+  return config.project.scheme ?? detectedScheme ?? config.project.bundleId.split(".").pop() ?? "App";
+}
 function toAndroidView(name, profile) {
   const isAab = profile.android?.buildType === "aab";
   const targets = profile.distribution.split("+").map((s) => s.trim());
@@ -337,23 +414,25 @@ function toAndroidView(name, profile) {
     androidArtifactPath: artifactPath
   };
 }
-function toIosView(name, profile, bundleId) {
+function toIosView(name, profile, bundleId, scheme) {
   const exportMethod = profile.ios?.exportMethod ?? "app-store";
   const targets = profile.distribution.split("+").map((s) => s.trim());
-  const matchType = exportMethod === "app-store" ? "appstore" : exportMethod === "ad-hoc" ? "adhoc" : "development";
-  const schemeName = bundleId.split(".").pop() ?? "App";
+  const matchType = matchTypeFor(exportMethod);
   return {
     name,
     description: `Build ${name} (ios)`,
     targets,
     exportMethod,
     matchType,
-    xcWorkspace: schemeName,
-    xcScheme: schemeName
+    provisioningProfileName: provisioningProfileName(matchType, bundleId),
+    codeSignIdentity: CODE_SIGN_IDENTITY[matchType],
+    xcWorkspace: scheme,
+    xcScheme: scheme
   };
 }
 function generateFastlane(config, options = {}) {
   const packageManager = options.packageManager ?? "yarn";
+  const scheme = resolveScheme(config, options.scheme);
   const androidProfiles = [];
   const iosProfiles = [];
   for (const [name, profile] of Object.entries(config.build)) {
@@ -361,13 +440,14 @@ function generateFastlane(config, options = {}) {
       androidProfiles.push(toAndroidView(name, profile));
     }
     if (profile.platform === "ios" || profile.platform === "all") {
-      iosProfiles.push(toIosView(name, profile, config.project.bundleId));
+      iosProfiles.push(toIosView(name, profile, config.project.bundleId, scheme));
     }
   }
   const allTargets = new Set(Object.values(config.build).flatMap((p2) => p2.distribution.split("+").map((s) => s.trim())));
   const fastfile = renderTemplate("fastlane/Fastfile.ejs", {
     androidProfiles,
     iosProfiles,
+    defaultPlatform: androidProfiles.length > 0 ? "android" : "ios",
     projectType: config.project.type,
     bundleId: config.project.bundleId,
     packageName: config.project.packageName,
@@ -581,7 +661,7 @@ function writeFileEnsured(path, content) {
 // src/utils/monorepo.ts
 import { execFileSync } from "node:child_process";
 import { readdirSync } from "node:fs";
-import { join as join2, relative, resolve as resolve2, sep } from "node:path";
+import { join as join2, relative, resolve as resolve3, sep } from "node:path";
 var CONFIG_FILENAME = "rn-workflows.yml";
 function discoverConfigs(root) {
   const found = [];
@@ -644,22 +724,22 @@ function toPosixRelative(from, to) {
 function resolveWorkflowsDir(input) {
   const { cwd, gitRoot, flag, configValue } = input;
   if (flag)
-    return resolve2(cwd, flag);
+    return resolve3(cwd, flag);
   if (configValue)
-    return resolve2(cwd, configValue);
+    return resolve3(cwd, configValue);
   return join2(gitRoot ?? cwd, ".github", "workflows");
 }
 function resolveMatrixWorkflowsDir(input) {
   const { gitRoot, flag, apps } = input;
   if (flag)
-    return { dir: resolve2(gitRoot, flag), warnings: [] };
+    return { dir: resolve3(gitRoot, flag), warnings: [] };
   const declared = apps.filter((app) => app.workflowsDir !== undefined);
   if (declared.length === 0) {
     return { dir: join2(gitRoot, ".github", "workflows"), warnings: [] };
   }
   const values = new Set(declared.map((app) => app.workflowsDir));
   if (declared.length === apps.length && values.size === 1) {
-    return { dir: resolve2(gitRoot, declared[0].workflowsDir), warnings: [] };
+    return { dir: resolve3(gitRoot, declared[0].workflowsDir), warnings: [] };
   }
   const ignored = declared.map((app) => `${app.dir === "" ? "." : app.dir} (${app.workflowsDir})`).join(", ");
   return {
@@ -672,11 +752,11 @@ function resolveMatrixWorkflowsDir(input) {
 
 // src/commands/generate.ts
 function detectPackageManagerAt(dir) {
-  if (existsSync2(resolve3(dir, "bun.lock")) || existsSync2(resolve3(dir, "bun.lockb")))
+  if (existsSync2(resolve4(dir, "bun.lock")) || existsSync2(resolve4(dir, "bun.lockb")))
     return "bun";
-  if (existsSync2(resolve3(dir, "yarn.lock")))
+  if (existsSync2(resolve4(dir, "yarn.lock")))
     return "yarn";
-  if (existsSync2(resolve3(dir, "package-lock.json")))
+  if (existsSync2(resolve4(dir, "package-lock.json")))
     return "npm";
   return null;
 }
@@ -691,7 +771,7 @@ function detectPackageManager(...dirs) {
 function writeFiles(files, { outDir, dryRun }) {
   p2.log.info(`${dryRun ? "[dry-run] " : ""}Generating ${files.length} file(s) in ${outDir}`);
   for (const file of files) {
-    const abs = resolve3(outDir, file.path);
+    const abs = resolve4(outDir, file.path);
     if (dryRun) {
       p2.log.step(`would write ${file.path} (${file.content.length} bytes)`);
     } else {
@@ -798,13 +878,13 @@ var generate_default = defineCommand2({
   async run({ args }) {
     if (args.matrix) {
       runMatrix({
-        cwd: resolve3(String(args.cwd)),
+        cwd: resolve4(String(args.cwd)),
         ...args["workflows-dir"] ? { workflowsDirFlag: String(args["workflows-dir"]) } : {},
         dryRun: Boolean(args["dry-run"])
       });
       return;
     }
-    const configPath = resolve3(String(args.cwd), String(args.config));
+    const configPath = resolve4(String(args.cwd), String(args.config));
     if (!existsSync2(configPath)) {
       p2.log.error(`Config not found: ${configPath}`);
       p2.log.info("Run `rn-workflows init` to create one.");
@@ -827,8 +907,14 @@ var generate_default = defineCommand2({
       }
       config = { ...config, ci: args.ci };
     }
-    const appDirAbs = resolve3(String(args.cwd));
+    const appDirAbs = resolve4(String(args.cwd));
     const packageManager = detectPackageManager(appDirAbs);
+    const detectedScheme = config.project.scheme === undefined && config.project.type === "expo" ? detectExpoScheme(appDirAbs) : undefined;
+    if (detectedScheme) {
+      p2.log.info(`Detected Xcode scheme "${detectedScheme}" from app.json`);
+    } else if (config.project.scheme === undefined && config.project.type === "expo") {
+      p2.log.warn("Could not read expo.name (dynamic app.config.js?). Falling back to the bundle id — set project.scheme in rn-workflows.yml if the Xcode scheme differs.");
+    }
     const gitRoot = findGitRoot(appDirAbs);
     const appDir = gitRoot ? toPosixRelative(gitRoot, appDirAbs) : "";
     const workflowsDir = resolveWorkflowsDir({
@@ -844,7 +930,7 @@ var generate_default = defineCommand2({
       ...gitRoot ? { workflowsPathFromRoot: toPosixRelative(gitRoot, workflowsDir) } : {}
     };
     const files = [
-      ...generateFastlane(config, { packageManager }),
+      ...generateFastlane(config, { packageManager, scheme: detectedScheme }),
       ...config.ci === "github-actions" ? generateGithubActions(config, githubOptions) : generateGitlab(config)
     ];
     writeFiles(files, { outDir: String(args.cwd), dryRun: Boolean(args["dry-run"]) });
@@ -853,7 +939,7 @@ var generate_default = defineCommand2({
 
 // src/commands/setup.ts
 import { defineCommand as defineCommand3 } from "citty";
-import { resolve as resolve4 } from "node:path";
+import { resolve as resolve5 } from "node:path";
 import { existsSync as existsSync5 } from "node:fs";
 import * as p5 from "@clack/prompts";
 
@@ -883,7 +969,7 @@ async function runSteps(steps, ctx) {
 // src/setup/firebase.ts
 import { tmpdir } from "node:os";
 import { join as join4 } from "node:path";
-import { unlinkSync, readFileSync as readFileSync3 } from "node:fs";
+import { unlinkSync, readFileSync as readFileSync4 } from "node:fs";
 
 // src/setup/shell.ts
 import { spawnSync } from "node:child_process";
@@ -1011,7 +1097,7 @@ function makeServiceAccountStep() {
         throw new Error(`gcloud key create failed: ${r.stderr}`);
       let json;
       try {
-        json = readFileSync3(tmpPath, "utf8");
+        json = readFileSync4(tmpPath, "utf8");
       } finally {
         try {
           unlinkSync(tmpPath);
@@ -1145,7 +1231,7 @@ function getExistingGitlabVariables(projectId) {
 }
 
 // src/setup/appstore.ts
-import { existsSync as existsSync3, readFileSync as readFileSync4 } from "node:fs";
+import { existsSync as existsSync3, readFileSync as readFileSync5 } from "node:fs";
 function makeAppStoreStep() {
   return {
     id: "appstore",
@@ -1166,14 +1252,14 @@ function makeAppStoreStep() {
       const keyPath = await promptText("Path to App Store Connect API key JSON");
       if (!existsSync3(keyPath))
         throw new Error(`File not found: ${keyPath}`);
-      ctx.collectedSecrets["APP_STORE_CONNECT_API_KEY_PATH"] = readFileSync4(keyPath, "utf8");
+      ctx.collectedSecrets["APP_STORE_CONNECT_API_KEY_PATH"] = readFileSync5(keyPath, "utf8");
       return { skipped: false };
     }
   };
 }
 
 // src/setup/playstore.ts
-import { existsSync as existsSync4, readFileSync as readFileSync5 } from "node:fs";
+import { existsSync as existsSync4, readFileSync as readFileSync6 } from "node:fs";
 function makePlayStoreStep() {
   return {
     id: "playstore",
@@ -1192,7 +1278,7 @@ function makePlayStoreStep() {
       const keyPath = await promptText("Path to Play Store JSON key file");
       if (!existsSync4(keyPath))
         throw new Error(`File not found: ${keyPath}`);
-      ctx.collectedSecrets["PLAY_STORE_JSON_KEY"] = readFileSync5(keyPath, "utf8");
+      ctx.collectedSecrets["PLAY_STORE_JSON_KEY"] = readFileSync6(keyPath, "utf8");
       return { skipped: false };
     }
   };
@@ -1214,7 +1300,7 @@ var setup_default = defineCommand3({
   },
   async run({ args }) {
     p5.intro("rn-workflows setup");
-    const configPath = resolve4(String(args.cwd), String(args.config));
+    const configPath = resolve5(String(args.cwd), String(args.config));
     if (!existsSync5(configPath)) {
       p5.log.error(`Config not found: ${configPath}`);
       p5.log.info("Run `rn-workflows init` first.");
@@ -1334,7 +1420,7 @@ function assertNotCancelled2(value) {
 
 // src/commands/menu.ts
 import { existsSync as existsSync6 } from "node:fs";
-import { resolve as resolve5 } from "node:path";
+import { resolve as resolve6 } from "node:path";
 import * as p6 from "@clack/prompts";
 import { spawnSync as spawnSync2 } from "node:child_process";
 var MENU_CHOICES = [
@@ -1399,7 +1485,7 @@ async function runMenu(cwd = process.cwd()) {
   }
 }
 async function handleSetupMenu(cwd) {
-  const configPath = resolve5(cwd, "rn-workflows.yml");
+  const configPath = resolve6(cwd, "rn-workflows.yml");
   if (!existsSync6(configPath)) {
     p6.log.error("rn-workflows.yml not found. Run Init project first.");
     return;
@@ -1552,14 +1638,14 @@ async function handleConfigureAppleAuth(cwd) {
   });
   if (typeof method === "symbol")
     return;
-  const envPath = resolve5(cwd, "fastlane", ".env");
+  const envPath = resolve6(cwd, "fastlane", ".env");
   let existing = "";
   try {
     existing = (await import("node:fs")).readFileSync(envPath, "utf8");
   } catch {}
   const { writeFileSync: writeFileSync3 } = await import("node:fs");
   const { mkdirSync: mkdirSync2 } = await import("node:fs");
-  mkdirSync2(resolve5(cwd, "fastlane"), { recursive: true });
+  mkdirSync2(resolve6(cwd, "fastlane"), { recursive: true });
   if (method === "asc") {
     const keyId = await promptText("Key ID (from App Store Connect)");
     const issuerId = await promptText("Issuer ID (from App Store Connect)");
@@ -1612,8 +1698,19 @@ async function handleConfigureAppleAuth(cwd) {
   }
 }
 
+// src/utils/cli.ts
+function shouldRunMenu(positionals, subCommandNames) {
+  const first = positionals[0];
+  return typeof first !== "string" || !subCommandNames.includes(first);
+}
+
 // src/index.ts
 var { version } = createRequire2(import.meta.url)("../package.json");
+var subCommands = {
+  init: init_default,
+  generate: generate_default,
+  setup: setup_default
+};
 var main = defineCommand4({
   meta: {
     name: "rn-workflows",
@@ -1627,12 +1724,11 @@ var main = defineCommand4({
       default: process.cwd()
     }
   },
-  subCommands: {
-    init: init_default,
-    generate: generate_default,
-    setup: setup_default
-  },
+  subCommands,
   async run({ args }) {
+    const positionals = Array.isArray(args._) ? args._ : [];
+    if (!shouldRunMenu(positionals, Object.keys(subCommands)))
+      return;
     await runMenu(String(args.cwd));
   }
 });

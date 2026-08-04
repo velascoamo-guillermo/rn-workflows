@@ -1,5 +1,8 @@
 # rn-workflows
 
+[![npm version](https://img.shields.io/npm/v/rn-workflows.svg)](https://www.npmjs.com/package/rn-workflows)
+[![CI](https://github.com/velascoamo-guillermo/rn-workflows/actions/workflows/ci.yml/badge.svg)](https://github.com/velascoamo-guillermo/rn-workflows/actions/workflows/ci.yml)
+
 Open-source CLI alternative to EAS Workflows. Define build profiles in one YAML file, generate Fastlane lanes + GitHub Actions + GitLab CI pipelines automatically.
 
 ## Why

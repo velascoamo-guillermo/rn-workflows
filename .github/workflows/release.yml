@@ -51,5 +51,13 @@ jobs:
       - name: Update npm for trusted publishing
         run: npm install -g npm@latest
 
+      # Prereleases go to the `beta` dist-tag so `npm install rn-workflows`
+      # keeps resolving to the latest stable; npm >= 11 refuses to publish a
+      # prerelease without an explicit tag.
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            npm publish --provenance --access public --tag beta
+          else
+            npm publish --provenance --access public
+          fi

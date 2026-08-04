@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.2.0 - 2026-08-XX
+## 0.2.0 - 2026-08-04
 
 ### Added
 
@@ -29,9 +29,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `AppStore` (previously fell through to `Development` for store builds),
   and the code-signing identity uses `Apple Distribution` instead of the
   legacy `iPhone Distribution`.
-- Xcode scheme/workspace is now derived from the Expo `name` field (matching
-  what `expo prebuild` actually generates), falling back to `project.scheme`
-  or the bundle-id slug when no Expo config is present.
+- Xcode scheme/workspace resolution: `project.scheme` wins when set, else the
+  Expo `name` field is detected (matching what `expo prebuild` actually
+  generates), else the bundle-id slug as before.
 - Interactive menu no longer re-opens after `generate` completes — citty
   runs the parent command after a matched subcommand, so `generate` now
   exits cleanly on its own.

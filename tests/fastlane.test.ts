@@ -179,6 +179,61 @@ describe('Fastfile snapshot', () => {
   });
 });
 
+describe('expo prebuild runs outside the bundler env', () => {
+  it('wraps the prebuild lane in Bundler.with_unbundled_env for expo projects', () => {
+    const content = fastfileFor('expo-pawlog.yml', { scheme: 'Pawlog' });
+    expect(content).toContain('private_lane :prebuild');
+    expect(content).toContain('Bundler.with_unbundled_env do');
+    expect(content).toContain('expo prebuild --platform ios --clean');
+  });
+
+  it('guards Bundler.with_unbundled_env so plain `fastlane` (no bundle exec) does not NameError', () => {
+    const content = fastfileFor('expo-pawlog.yml', { scheme: 'Pawlog' });
+    expect(content).toContain('if defined?(Bundler)');
+  });
+
+  it('uses the bun expo prebuild invocation when packageManager is bun', () => {
+    const content = fastfileFor('expo-pawlog.yml', { scheme: 'Pawlog', packageManager: 'bun' });
+    expect(content).toContain('bun expo prebuild --platform ios --clean');
+    expect(content).not.toContain('yarn expo prebuild');
+    expect(content).not.toContain('npx expo prebuild');
+  });
+
+  it('uses the npx expo prebuild invocation when packageManager is npm', () => {
+    const content = fastfileFor('expo-pawlog.yml', { scheme: 'Pawlog', packageManager: 'npm' });
+    expect(content).toContain('npx expo prebuild --platform ios --clean');
+    expect(content).not.toContain('bun expo prebuild');
+    expect(content).not.toContain('yarn expo prebuild');
+  });
+
+  it('calls prebuild before build_app in expo ios lanes', () => {
+    const content = fastfileFor('expo-pawlog.yml', { scheme: 'Pawlog' });
+    const lanesIndex = content.indexOf('lane :production do');
+    const prebuildCallIndex = content.indexOf('\n    prebuild\n', lanesIndex);
+    const buildAppIndex = content.indexOf('build_app(', lanesIndex);
+    expect(prebuildCallIndex).toBeGreaterThan(-1);
+    expect(prebuildCallIndex).toBeLessThan(buildAppIndex);
+  });
+
+  it('runs setup_ci before prebuild in expo ios lanes', () => {
+    const content = fastfileFor('expo-pawlog.yml', { scheme: 'Pawlog' });
+    const lanesIndex = content.indexOf('lane :production do');
+    const setupCiIndex = content.indexOf('setup_ci if ENV["CI"]', lanesIndex);
+    const prebuildCallIndex = content.indexOf('\n    prebuild\n', lanesIndex);
+    expect(setupCiIndex).toBeGreaterThan(-1);
+    expect(prebuildCallIndex).toBeGreaterThan(-1);
+    expect(setupCiIndex).toBeLessThan(prebuildCallIndex);
+  });
+
+  it('leaves bare (non-expo) projects unaffected', () => {
+    const content = fastfileFor('ios-development.yml');
+    expect(content).not.toContain('private_lane :prebuild');
+    expect(content).not.toContain('Bundler.with_unbundled_env');
+    expect(content).not.toContain('expo prebuild');
+    expect(content).not.toContain('prebuild');
+  });
+});
+
 describe('Matchfile', () => {
   it('is not emitted when project.ios.match is absent', () => {
     const cfg = parseConfig(fixture('production-all.yml'));

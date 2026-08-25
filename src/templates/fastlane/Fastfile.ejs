@@ -50,6 +50,9 @@ platform :ios do
   desc "<%= profile.description %>"
   lane :<%= profile.name %> do
     setup_ci if ENV["CI"]
+<% if (projectType === 'expo') { -%>
+    prebuild
+<% } -%>
     match(type: "<%= profile.matchType %>", readonly: ENV.fetch("MATCH_READONLY", "true") == "true") if ENV["MATCH_PASSWORD"]
     build_app(
       workspace: "ios/<%= profile.xcWorkspace %>.xcworkspace",
@@ -123,6 +126,23 @@ end
 <% } -%>
 <% if (hasIos) { -%>
 platform :ios do
+<% if (projectType === 'expo') { -%>
+  desc "Regenerate ios/ from app.json. Native dirs are not committed."
+  private_lane :prebuild do
+    # bundle exec exports BUNDLE_GEMFILE; prebuild's `pod install` then resolves
+    # `pod` through this bundle, which does not contain cocoapods. Strip the
+    # bundler env so pod comes from the system Ruby instead.
+    prebuild_cmd = "cd .. && <%= packageManager === 'bun' ? 'bun expo prebuild' : packageManager === 'npm' ? 'npx expo prebuild' : 'yarn expo prebuild' %> --platform ios --clean"
+    if defined?(Bundler)
+      Bundler.with_unbundled_env do
+        sh(prebuild_cmd)
+      end
+    else
+      sh(prebuild_cmd)
+    end
+  end
+
+<% } -%>
   lane :add_device do |options|
     name = options[:name] || UI.input("Device name:")
     udid = options[:udid] || UI.input("Device UDID:")

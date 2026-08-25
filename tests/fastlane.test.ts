@@ -178,3 +178,77 @@ describe('Fastfile snapshot', () => {
     expect(fastfileFor('expo-pawlog.yml', { scheme: 'Pawlog' })).toMatchSnapshot();
   });
 });
+
+describe('Matchfile', () => {
+  it('is not emitted when project.ios.match is absent', () => {
+    const cfg = parseConfig(fixture('production-all.yml'));
+    const files = generateFastlane(cfg);
+    expect(files.find((f) => f.path === 'fastlane/Matchfile')).toBeUndefined();
+  });
+
+  it('is emitted with git_url, storage_mode and app_identifier when project.ios.match is present', () => {
+    const cfg = parseConfig(fixture('ios-signing.yml'));
+    const files = generateFastlane(cfg);
+    const matchfile = files.find((f) => f.path === 'fastlane/Matchfile');
+    expect(matchfile).toBeDefined();
+    expect(matchfile!.content).toContain(
+      'git_url("https://github.com/gvelasco/certificates.git")',
+    );
+    expect(matchfile!.content).toContain('storage_mode("git")');
+    expect(matchfile!.content).toContain('app_identifier("com.gvelasco.pawlog")');
+  });
+});
+
+describe('developmentTeam signing', () => {
+  it('renders team_id into Appfile when project.ios.developmentTeam is set', () => {
+    const cfg = parseConfig(fixture('ios-signing.yml'));
+    const appfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Appfile')!;
+    expect(appfile.content).toContain('team_id("AB12CD34EF")');
+  });
+
+  it('falls back to the ENV-based team_id in Appfile when developmentTeam is unset', () => {
+    const cfg = parseConfig(fixture('production-all.yml'));
+    const appfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Appfile')!;
+    expect(appfile.content).toContain('team_id(ENV["APPLE_TEAM_ID"]) if ENV["APPLE_TEAM_ID"]');
+    expect(appfile.content).not.toContain('DEVELOPMENT_TEAM');
+  });
+
+  it('adds DEVELOPMENT_TEAM to the manual-signing xcargs in iOS lanes when set', () => {
+    const cfg = parseConfig(fixture('ios-signing.yml'));
+    const fastfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Fastfile')!;
+    expect(fastfile.content).toContain(
+      "xcargs: \"CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=AB12CD34EF PROVISIONING_PROFILE_SPECIFIER='match AppStore com.gvelasco.pawlog' CODE_SIGN_IDENTITY='Apple Distribution'\",",
+    );
+  });
+
+  it('omits DEVELOPMENT_TEAM from xcargs when developmentTeam is unset (existing behavior)', () => {
+    const content = fastfileFor('expo-pawlog-scheme.yml');
+    expect(content).not.toContain('DEVELOPMENT_TEAM');
+    expect(content).toContain(
+      "xcargs: \"CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER='match AppStore com.gvelasco.pawlog' CODE_SIGN_IDENTITY='Apple Distribution'\",",
+    );
+  });
+
+  it('adds teamID to export_options when developmentTeam is set', () => {
+    const content = fastfileFor('ios-signing.yml');
+    expect(content).toContain('teamID: "AB12CD34EF"');
+  });
+
+  it('omits teamID from export_options when developmentTeam is unset', () => {
+    const content = fastfileFor('expo-pawlog-scheme.yml');
+    expect(content).not.toContain('teamID:');
+  });
+
+  it('renders a literal team_id in Appfile when developmentTeam is set (explicit wins)', () => {
+    const cfg = parseConfig(fixture('ios-signing.yml'));
+    const appfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Appfile')!;
+    expect(appfile.content).toContain('team_id("AB12CD34EF")');
+    expect(appfile.content).not.toContain('ENV["APPLE_TEAM_ID"]');
+  });
+
+  it('keeps the ENV-based team_id fallback in Appfile when developmentTeam is unset', () => {
+    const cfg = parseConfig(fixture('production-all.yml'));
+    const appfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Appfile')!;
+    expect(appfile.content).toContain('team_id(ENV["APPLE_TEAM_ID"]) if ENV["APPLE_TEAM_ID"]');
+  });
+});

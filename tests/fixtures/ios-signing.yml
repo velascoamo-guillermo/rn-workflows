@@ -1,0 +1,18 @@
+project:
+  type: bare
+  bundleId: com.gvelasco.pawlog
+  packageName: com.gvelasco.pawlog
+  scheme: Pawlog
+  ios:
+    developmentTeam: AB12CD34EF
+    match:
+      gitUrl: https://github.com/gvelasco/certificates.git
+
+ci: github-actions
+
+build:
+  production:
+    platform: ios
+    distribution: store
+    ios:
+      exportMethod: app-store

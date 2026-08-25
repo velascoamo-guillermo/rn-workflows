@@ -3,7 +3,11 @@
 for_platform :ios do
   app_identifier("<%= bundleId %>")
   apple_id(ENV["FASTLANE_APPLE_ID"]) if ENV["FASTLANE_APPLE_ID"]
+<% if (developmentTeam) { -%>
+  team_id("<%= developmentTeam %>")
+<% } else { -%>
   team_id(ENV["APPLE_TEAM_ID"]) if ENV["APPLE_TEAM_ID"]
+<% } -%>
 end
 
 for_platform :android do

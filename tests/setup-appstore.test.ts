@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
-import * as realFs from 'node:fs';
+import { afterAll, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Config } from '../src/config/types.ts';
 import type { SetupContext } from '../src/setup/types.ts';
 import { collectRequiredSecrets } from '../src/setup/secrets.ts';
@@ -7,13 +9,15 @@ import { collectRequiredSecrets } from '../src/setup/secrets.ts';
 /**
  * src/setup/appstore.ts is the only runtime path that collects ASC_* values
  * interactively (#38 review: zero test coverage on it). It talks to
- * @clack/prompts (via ./prompts.ts) and the real filesystem, so both are
- * mocked out via `mock.module` before the module under test is imported.
+ * @clack/prompts (via ./prompts.ts), so that's mocked out via `mock.module`
+ * before the module under test is imported — `mock.module` patches the
+ * module registry for the whole test process, not just this file, so the
+ * filesystem is deliberately left real (a real temp file/dir below) instead
+ * of also mocking node:fs, which would leak into unrelated tests.
  */
 
 const promptTextQueue: string[] = [];
 const promptConfirmQueue: boolean[] = [];
-const fsState: { exists: boolean; content: string } = { exists: true, content: '-----BEGIN PRIVATE KEY-----\nfakekey\n-----END PRIVATE KEY-----\n' };
 
 mock.module('../src/setup/prompts.ts', () => ({
   promptText: async (_message: string) => {
@@ -28,13 +32,16 @@ mock.module('../src/setup/prompts.ts', () => ({
   },
 }));
 
-mock.module('node:fs', () => ({
-  ...realFs,
-  existsSync: (_p: string) => fsState.exists,
-  readFileSync: (_p: string, _enc?: string) => fsState.content,
-}));
-
 const { makeAppStoreStep } = await import('../src/setup/appstore.ts');
+
+const tmpDir = mkdtempSync(join(tmpdir(), 'rnwf-appstore-test-'));
+const keyPath = join(tmpDir, 'key.p8');
+const KEY_CONTENT = '-----BEGIN PRIVATE KEY-----\nfakekey\n-----END PRIVATE KEY-----\n';
+writeFileSync(keyPath, KEY_CONTENT);
+
+afterAll(() => {
+  rmSync(tmpDir, { recursive: true, force: true });
+});
 
 function baseCtx(config: Config): SetupContext {
   return { config, dryRun: false, collectedSecrets: {} };
@@ -50,8 +57,6 @@ describe('makeAppStoreStep (#34)', () => {
   beforeEach(() => {
     promptTextQueue.length = 0;
     promptConfirmQueue.length = 0;
-    fsState.exists = true;
-    fsState.content = '-----BEGIN PRIVATE KEY-----\nfakekey\n-----END PRIVATE KEY-----\n';
   });
 
   it('skips when no build profile needs App Store Connect', async () => {
@@ -65,7 +70,7 @@ describe('makeAppStoreStep (#34)', () => {
   });
 
   it('stores the raw key and ASC_KEY_IS_BASE64=false when the user declines base64', async () => {
-    promptTextQueue.push('ABCD1234EF', 'KEYID123', 'ISSUER-UUID', '/tmp/key.p8');
+    promptTextQueue.push('ABCD1234EF', 'KEYID123', 'ISSUER-UUID', keyPath);
     promptConfirmQueue.push(false);
 
     const ctx = baseCtx(testflightConfig);
@@ -75,12 +80,12 @@ describe('makeAppStoreStep (#34)', () => {
     expect(ctx.collectedSecrets['APPLE_TEAM_ID']).toBe('ABCD1234EF');
     expect(ctx.collectedSecrets['ASC_KEY_ID']).toBe('KEYID123');
     expect(ctx.collectedSecrets['ASC_ISSUER_ID']).toBe('ISSUER-UUID');
-    expect(ctx.collectedSecrets['ASC_KEY_CONTENT']).toBe(fsState.content);
+    expect(ctx.collectedSecrets['ASC_KEY_CONTENT']).toBe(KEY_CONTENT);
     expect(ctx.collectedSecrets['ASC_KEY_IS_BASE64']).toBe('false');
   });
 
   it('base64-encodes the key and sets ASC_KEY_IS_BASE64=true when the user opts in', async () => {
-    promptTextQueue.push('ABCD1234EF', 'KEYID123', 'ISSUER-UUID', '/tmp/key.p8');
+    promptTextQueue.push('ABCD1234EF', 'KEYID123', 'ISSUER-UUID', keyPath);
     promptConfirmQueue.push(true);
 
     const ctx = baseCtx(testflightConfig);
@@ -88,17 +93,17 @@ describe('makeAppStoreStep (#34)', () => {
 
     expect(ctx.collectedSecrets['ASC_KEY_IS_BASE64']).toBe('true');
     expect(ctx.collectedSecrets['ASC_KEY_CONTENT']).toBe(
-      Buffer.from(fsState.content, 'utf8').toString('base64'),
+      Buffer.from(KEY_CONTENT, 'utf8').toString('base64'),
     );
     // sanity: decoding gets the original PEM back
     expect(Buffer.from(ctx.collectedSecrets['ASC_KEY_CONTENT']!, 'base64').toString('utf8')).toBe(
-      fsState.content,
+      KEY_CONTENT,
     );
   });
 
   it('throws when the .p8 path does not exist', async () => {
-    promptTextQueue.push('ABCD1234EF', 'KEYID123', 'ISSUER-UUID', '/tmp/missing.p8');
-    fsState.exists = false;
+    const missingPath = join(tmpDir, 'missing.p8');
+    promptTextQueue.push('ABCD1234EF', 'KEYID123', 'ISSUER-UUID', missingPath);
 
     await expect(makeAppStoreStep().run(baseCtx(testflightConfig))).rejects.toThrow('File not found');
   });
@@ -108,7 +113,7 @@ describe('makeAppStoreStep (#34)', () => {
   // truth since #34) actually demands would only surface at runtime. Pin
   // the two together so it fails in CI instead.
   it('collects exactly the APPLE_TEAM_ID/ASC_* names collectRequiredSecrets demands for this config', async () => {
-    promptTextQueue.push('ABCD1234EF', 'KEYID123', 'ISSUER-UUID', '/tmp/key.p8');
+    promptTextQueue.push('ABCD1234EF', 'KEYID123', 'ISSUER-UUID', keyPath);
     promptConfirmQueue.push(false);
 
     const ctx = baseCtx(testflightConfig);

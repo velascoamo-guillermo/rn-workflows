@@ -38,6 +38,7 @@ end
 platform :ios do
   desc "Build production (ios)"
   lane :production do
+    prebuild
     setup_ci if ENV["CI"]
     match(type: "appstore", readonly: ENV.fetch("MATCH_READONLY", "true") == "true") if ENV["MATCH_PASSWORD"]
     build_app(
@@ -63,6 +64,16 @@ platform :ios do
 end
 
 platform :ios do
+  desc "Regenerate ios/ from app.json. Native dirs are not committed."
+  private_lane :prebuild do
+    # bundle exec exports BUNDLE_GEMFILE; prebuild's \`pod install\` then resolves
+    # \`pod\` through this bundle, which does not contain cocoapods. Strip the
+    # bundler env so pod comes from the system Ruby instead.
+    Bundler.with_unbundled_env do
+      sh("cd .. && yarn expo prebuild --platform ios --clean")
+    end
+  end
+
   lane :add_device do |options|
     name = options[:name] || UI.input("Device name:")
     udid = options[:udid] || UI.input("Device UDID:")

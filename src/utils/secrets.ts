@@ -26,8 +26,12 @@ const SECRET_DESCRIPTIONS: Record<string, string> = {
     'Firebase service account JSON (full file contents) with App Distribution admin access. Firebase console → Project settings → Service accounts → Generate new private key.',
   PLAY_STORE_JSON_KEY:
     'Google Play service account JSON key with Release Manager access. Play Console → Setup → API access → Service accounts.',
-  APP_STORE_CONNECT_API_KEY_PATH:
-    'A filesystem PATH, not the key content — fastlane\'s `api_key_path:` opens this file at build time. The generated workflow sets this env var directly to the secret VALUE without writing anything to disk first, so a secret holding raw .p8/JSON content will NOT work as-is. Until CI gains a "materialize key to file" step (tracked separately), point this at a location your CI job provisions the key file at (e.g. a path a prior step writes), or store the file content under a different secret and add that materialization step yourself. App Store Connect → Users and Access → Integrations → App Store Connect API.',
+  ASC_KEY_ID:
+    'App Store Connect API key ID (10-character identifier shown next to the key). App Store Connect → Users and Access → Integrations → App Store Connect API.',
+  ASC_ISSUER_ID:
+    'App Store Connect API issuer ID (UUID shown above the keys table). App Store Connect → Users and Access → Integrations → App Store Connect API.',
+  ASC_KEY_CONTENT:
+    'Full contents of the downloaded .p8 private key file, pasted as-is (raw, not base64) — fastlane\'s `app_store_connect_api_key(key_content:)` reads it directly from this env var, no file materialization step needed. App Store Connect → Users and Access → Integrations → App Store Connect API → generate/download a key (only downloadable once, so save it).',
   APPLE_TEAM_ID:
     'Your 10-character Apple Developer Team ID. Read by fastlane\'s Appfile as a fallback whenever `project.ios.developmentTeam` is left unset in rn-workflows.yml — but the generated CI workflow declares this secret unconditionally for every testflight/store iOS job regardless, so set it either way. App Store Connect → Membership.',
   MATCH_PASSWORD:

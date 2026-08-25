@@ -22,9 +22,12 @@ export function makeAppStoreStep() {
       const teamId = await promptText('Apple Team ID (e.g. ABCD1234)');
       ctx.collectedSecrets['APPLE_TEAM_ID'] = teamId;
 
-      const keyPath = await promptText('Path to App Store Connect API key JSON');
+      ctx.collectedSecrets['ASC_KEY_ID'] = await promptText('App Store Connect API key ID');
+      ctx.collectedSecrets['ASC_ISSUER_ID'] = await promptText('App Store Connect API issuer ID');
+
+      const keyPath = await promptText('Path to the downloaded .p8 App Store Connect API key file');
       if (!existsSync(keyPath)) throw new Error(`File not found: ${keyPath}`);
-      ctx.collectedSecrets['APP_STORE_CONNECT_API_KEY_PATH'] = readFileSync(keyPath, 'utf8');
+      ctx.collectedSecrets['ASC_KEY_CONTENT'] = readFileSync(keyPath, 'utf8');
 
       return { skipped: false };
     },

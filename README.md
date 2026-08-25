@@ -117,9 +117,9 @@ Combine multiple targets with `+`, e.g. `testflight+firebase`.
 | Distribution | Android env vars | iOS env vars |
 | --- | --- | --- |
 | `firebase` | `FIREBASE_APP_ID_ANDROID`, `FIREBASE_SERVICE_ACCOUNT_JSON` | `FIREBASE_APP_ID_IOS`, `FIREBASE_SERVICE_ACCOUNT_JSON` |
-| `testflight` | — | `APP_STORE_CONNECT_API_KEY_PATH`, `APPLE_TEAM_ID` |
+| `testflight` | — | `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_CONTENT`, `APPLE_TEAM_ID` |
 | `appcenter` | `APPCENTER_API_TOKEN`, `APPCENTER_OWNER_NAME`, `APPCENTER_APP_NAME_ANDROID` | `APPCENTER_API_TOKEN`, `APPCENTER_OWNER_NAME`, `APPCENTER_APP_NAME_IOS` |
-| `store` | `PLAY_STORE_JSON_KEY` | `APP_STORE_CONNECT_API_KEY_PATH`, `APPLE_TEAM_ID` |
+| `store` | `PLAY_STORE_JSON_KEY` | `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_CONTENT`, `APPLE_TEAM_ID` |
 
 iOS jobs also require `MATCH_PASSWORD` and `MATCH_GIT_URL` for code signing via [fastlane match](https://docs.fastlane.tools/actions/match/).
 

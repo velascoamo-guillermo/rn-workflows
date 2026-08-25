@@ -358,9 +358,9 @@ describe('generateMatrixWorkflow', () => {
     // union across pawlog (store, ios+android) and vaulty (firebase, android)
     expect(env['PLAY_STORE_JSON_KEY']).toBe('${{ secrets.PLAY_STORE_JSON_KEY }}');
     expect(env['FIREBASE_APP_ID_ANDROID']).toBe('${{ secrets.FIREBASE_APP_ID_ANDROID }}');
-    expect(env['APP_STORE_CONNECT_API_KEY_PATH']).toBe(
-      '${{ secrets.APP_STORE_CONNECT_API_KEY_PATH }}',
-    );
+    expect(env['ASC_KEY_ID']).toBe('${{ secrets.ASC_KEY_ID }}');
+    expect(env['ASC_ISSUER_ID']).toBe('${{ secrets.ASC_ISSUER_ID }}');
+    expect(env['ASC_KEY_CONTENT']).toBe('${{ secrets.ASC_KEY_CONTENT }}');
     expect(env['MATCH_PASSWORD']).toBe('${{ secrets.MATCH_PASSWORD }}');
     expect(env['MATCH_GIT_BASIC_AUTHORIZATION']).toBe(
       '${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}',

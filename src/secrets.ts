@@ -7,11 +7,13 @@ const ANDROID_SECRETS: Record<Distribution, string[]> = {
   store: ['PLAY_STORE_JSON_KEY'],
 };
 
+const APP_STORE_CONNECT_SECRETS = ['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_CONTENT'];
+
 const IOS_SECRETS: Record<Distribution, string[]> = {
   firebase: ['FIREBASE_APP_ID_IOS', 'FIREBASE_SERVICE_ACCOUNT_JSON'],
-  testflight: ['APP_STORE_CONNECT_API_KEY_PATH', 'APPLE_TEAM_ID'],
+  testflight: [...APP_STORE_CONNECT_SECRETS, 'APPLE_TEAM_ID'],
   'github-releases': ['GITHUB_TOKEN'],
-  store: ['APP_STORE_CONNECT_API_KEY_PATH', 'APPLE_TEAM_ID'],
+  store: [...APP_STORE_CONNECT_SECRETS, 'APPLE_TEAM_ID'],
 };
 
 const IOS_SIGNING_SECRETS = ['MATCH_PASSWORD', 'MATCH_GIT_URL'];

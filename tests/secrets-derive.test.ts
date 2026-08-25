@@ -16,7 +16,9 @@ describe('deriveRequiredSecrets', () => {
     expect(names(config).sort()).toEqual(
       [
         'APPLE_TEAM_ID',
-        'APP_STORE_CONNECT_API_KEY_PATH',
+        'ASC_KEY_ID',
+        'ASC_ISSUER_ID',
+        'ASC_KEY_CONTENT',
         'MATCH_GIT_BASIC_AUTHORIZATION',
         'MATCH_GIT_URL',
         'MATCH_PASSWORD',
@@ -44,7 +46,9 @@ describe('deriveRequiredSecrets', () => {
     expect(names(config).sort()).toEqual(
       [
         'APPLE_TEAM_ID',
-        'APP_STORE_CONNECT_API_KEY_PATH',
+        'ASC_KEY_ID',
+        'ASC_ISSUER_ID',
+        'ASC_KEY_CONTENT',
         'FIREBASE_APP_ID_ANDROID',
         'FIREBASE_APP_ID_IOS',
         'FIREBASE_SERVICE_ACCOUNT_JSON',

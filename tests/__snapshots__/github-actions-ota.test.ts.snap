@@ -148,7 +148,9 @@ jobs:
         run: bundle exec fastlane ios production
         env:
           APPLE_TEAM_ID: \${{ secrets.APPLE_TEAM_ID }}
-          APP_STORE_CONNECT_API_KEY_PATH: \${{ secrets.APP_STORE_CONNECT_API_KEY_PATH }}
+          ASC_ISSUER_ID: \${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: \${{ secrets.ASC_KEY_CONTENT }}
+          ASC_KEY_ID: \${{ secrets.ASC_KEY_ID }}
           MATCH_GIT_URL: \${{ secrets.MATCH_GIT_URL }}
           MATCH_PASSWORD: \${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_BASIC_AUTHORIZATION: \${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}

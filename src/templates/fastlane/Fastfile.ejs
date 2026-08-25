@@ -80,13 +80,11 @@ platform :ios do
 <% } -%>
 <% if (profile.targets.includes('testflight')) { -%>
     upload_to_testflight(
-      api_key_path: ENV["APP_STORE_CONNECT_API_KEY_PATH"],
       skip_waiting_for_build_processing: true
     )
 <% } -%>
 <% if (profile.targets.includes('store')) { -%>
     upload_to_app_store(
-      api_key_path: ENV["APP_STORE_CONNECT_API_KEY_PATH"],
       force: true,
       skip_metadata: true,
       skip_screenshots: true

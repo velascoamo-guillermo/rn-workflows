@@ -77,6 +77,27 @@ Resolution order:
    `expo prebuild` sanitizes it (`My App` → `MyApp`), when `project.type: expo`
 3. last segment of `bundleId` (legacy fallback)
 
+### `project.ios`
+
+App-wide iOS signing config (not per build profile):
+
+```yaml
+project:
+  ios:
+    developmentTeam: AB12CD34EF   # optional — Apple Developer Team ID
+    match:
+      gitUrl: https://github.com/myorg/certificates.git  # required if `match` is set
+      storageMode: git            # optional — only "git" is supported today
+```
+
+- `developmentTeam` renders `team_id("...")` in `fastlane/Appfile` and adds
+  `DEVELOPMENT_TEAM=<team>` to the manual-signing `xcargs` of every iOS lane in
+  `fastlane/Fastfile`, so `xcodebuild` can resolve the `match` signing identity
+  without a hand patch.
+- `match` emits `fastlane/Matchfile` (`git_url`, `storage_mode`,
+  `app_identifier` from `project.bundleId`). Omit it to keep the current
+  behavior of not generating a Matchfile.
+
 ## Supported distributions
 
 | Key | Target |

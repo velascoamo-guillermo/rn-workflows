@@ -502,7 +502,7 @@ var ANDROID_SECRETS = {
   "github-releases": ["GITHUB_TOKEN"],
   store: ["PLAY_STORE_JSON_KEY"]
 };
-var APP_STORE_CONNECT_SECRETS = ["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_KEY_CONTENT"];
+var APP_STORE_CONNECT_SECRETS = ["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_KEY_CONTENT", "ASC_KEY_IS_BASE64"];
 var IOS_SECRETS = {
   firebase: ["FIREBASE_APP_ID_IOS", "FIREBASE_SERVICE_ACCOUNT_JSON"],
   testflight: [...APP_STORE_CONNECT_SECRETS, "APPLE_TEAM_ID"],
@@ -781,7 +781,8 @@ var SECRET_DESCRIPTIONS = {
   PLAY_STORE_JSON_KEY: "Google Play service account JSON key with Release Manager access. Play Console → Setup → API access → Service accounts.",
   ASC_KEY_ID: "App Store Connect API key ID (10-character identifier shown next to the key). App Store Connect → Users and Access → Integrations → App Store Connect API.",
   ASC_ISSUER_ID: "App Store Connect API issuer ID (UUID shown above the keys table). App Store Connect → Users and Access → Integrations → App Store Connect API.",
-  ASC_KEY_CONTENT: "Full contents of the downloaded .p8 private key file, pasted as-is (raw, not base64) — fastlane's `app_store_connect_api_key(key_content:)` reads it directly from this env var, no file materialization step needed. App Store Connect → Users and Access → Integrations → App Store Connect API → generate/download a key (only downloadable once, so save it).",
+  ASC_KEY_CONTENT: 'Contents of the downloaded .p8 private key file — raw by default, or base64-encoded if ASC_KEY_IS_BASE64 is "true". fastlane\'s `app_store_connect_api_key(key_content:)` reads it directly from this env var, no file materialization step needed. App Store Connect → Users and Access → Integrations → App Store Connect API → generate/download a key (only downloadable once, so save it).',
+  ASC_KEY_IS_BASE64: 'Set to "true" when ASC_KEY_CONTENT is stored base64-encoded, "false" (or unset) for raw .p8 contents. The .p8 file is multiline and most CI secret stores (notably GitLab, whose masking rejects multiline values) can\'t mask it as-is — base64-encoding collapses it to one line so it can be masked. `rn-workflows setup` offers to encode it for you.',
   APPLE_TEAM_ID: "Your 10-character Apple Developer Team ID. Read by fastlane's Appfile as a fallback whenever `project.ios.developmentTeam` is left unset in rn-workflows.yml — but the generated CI workflow declares this secret unconditionally for every testflight/store iOS job regardless, so set it either way. App Store Connect → Membership.",
   MATCH_PASSWORD: "Passphrase that decrypts the fastlane match certificates repo. Choose one when running `fastlane match init`.",
   MATCH_GIT_URL: "Git URL of the private repo storing fastlane match's encrypted certificates, e.g. `https://github.com/org/certificates.git`. Read directly by fastlane's `match` action from the environment. If `project.ios.match.gitUrl` is set in rn-workflows.yml the generated Matchfile also carries the URL, but the CI workflow still declares this secret unconditionally — set it regardless.",
@@ -930,7 +931,22 @@ function runMatrix(args) {
   const packageManager = detectPackageManager(gitRoot, ...apps.map((app) => join3(gitRoot, app.dir)));
   p2.log.info(`Matrix mode: ${apps.length} app(s) — ${apps.map((app) => app.slug).join(", ")}`);
   const file = generateMatrixWorkflow(apps, { packageManager, workflowsDir });
-  writeFiles([file], { outDir: gitRoot, dryRun: args.dryRun });
+  const requiredSecrets = dedupeSecretsByName(apps.flatMap((app) => deriveRequiredSecrets(app.config)));
+  const files = [
+    file,
+    ...requiredSecrets.length > 0 ? [{ path: "SETUP.md", content: buildSetupMarkdown(requiredSecrets, "github-actions") }] : []
+  ];
+  writeFiles(files, {
+    outDir: gitRoot,
+    dryRun: args.dryRun,
+    secretsSummary: { secrets: requiredSecrets, ci: "github-actions" }
+  });
+}
+function dedupeSecretsByName(secrets) {
+  const byName = new Map;
+  for (const secret of secrets)
+    byName.set(secret.name, secret);
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 var generate_default = defineCommand2({
   meta: {
@@ -1088,6 +1104,14 @@ function isAvailable(cmd) {
 import * as p4 from "@clack/prompts";
 async function promptText(message, options) {
   const val = await p4.text({ message, ...options, validate: (v) => v?.trim() ? undefined : "Required" });
+  if (typeof val === "symbol") {
+    p4.cancel("Cancelled.");
+    process.exit(0);
+  }
+  return val;
+}
+async function promptConfirm(message, initialValue = false) {
+  const val = await p4.confirm({ message, initialValue });
   if (typeof val === "symbol") {
     p4.cancel("Cancelled.");
     process.exit(0);
@@ -1257,15 +1281,7 @@ function makeMatchRepoStep() {
 
 // src/setup/secrets.ts
 function collectRequiredSecrets(config) {
-  const set = new Set;
-  for (const profile of Object.values(config.build)) {
-    for (const platform of platformsFor(profile.platform)) {
-      for (const s of secretsFor(platform, profile.distribution)) {
-        set.add(s);
-      }
-    }
-  }
-  return [...set].sort();
+  return deriveRequiredSecrets(config).map((s) => s.name);
 }
 function makeSecretsStep() {
   return {
@@ -1352,7 +1368,10 @@ function makeAppStoreStep() {
       const keyPath = await promptText("Path to the downloaded .p8 App Store Connect API key file");
       if (!existsSync3(keyPath))
         throw new Error(`File not found: ${keyPath}`);
-      ctx.collectedSecrets["ASC_KEY_CONTENT"] = readFileSync5(keyPath, "utf8");
+      const keyContent = readFileSync5(keyPath, "utf8");
+      const useBase64 = await promptConfirm("Store the key as base64? (recommended for GitLab — multiline secrets cannot be masked there)");
+      ctx.collectedSecrets["ASC_KEY_CONTENT"] = useBase64 ? Buffer.from(keyContent, "utf8").toString("base64") : keyContent;
+      ctx.collectedSecrets["ASC_KEY_IS_BASE64"] = useBase64 ? "true" : "false";
       return { skipped: false };
     }
   };
@@ -1544,6 +1563,21 @@ var SETUP_CHOICES = [
   { value: "all", label: "All", hint: "Run all setup steps" },
   { value: "back", label: "Back" }
 ];
+function buildSetupSteps(choice) {
+  const stepsMap = {
+    firebase: [makeFirebaseAppsStep(), makeServiceAccountStep()],
+    match: [makeMatchRepoStep()],
+    secrets: [makeSecretsStep()],
+    all: [
+      makeFirebaseAppsStep(),
+      makeServiceAccountStep(),
+      makeMatchRepoStep(),
+      makeAppStoreStep(),
+      makeSecretsStep()
+    ]
+  };
+  return stepsMap[choice];
+}
 async function runMenu(cwd = process.cwd()) {
   p6.intro("rn-workflows");
   while (true) {
@@ -1625,13 +1659,7 @@ async function handleSetupMenu(cwd) {
     const raw = await promptText("GitHub repo (owner/repo)", { placeholder: "owner/repo" });
     ctx.githubRepo = raw.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "");
   }
-  const stepsMap = {
-    firebase: [makeFirebaseAppsStep(), makeServiceAccountStep()],
-    match: [makeMatchRepoStep()],
-    secrets: [makeSecretsStep()],
-    all: [makeFirebaseAppsStep(), makeServiceAccountStep(), makeMatchRepoStep(), makeSecretsStep()]
-  };
-  const selectedSteps = stepsMap[choice];
+  const selectedSteps = buildSetupSteps(choice);
   if (!selectedSteps)
     return;
   try {

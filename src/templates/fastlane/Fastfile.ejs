@@ -56,7 +56,7 @@ platform :ios do
       scheme: "<%= profile.xcScheme %>",
       export_method: "<%= profile.exportMethod %>",
       output_directory: "ios/build",
-      xcargs: "CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER='<%= profile.provisioningProfileName %>' CODE_SIGN_IDENTITY='<%= profile.codeSignIdentity %>'",
+      xcargs: "CODE_SIGN_STYLE=Manual<%= developmentTeam ? ` DEVELOPMENT_TEAM=${developmentTeam}` : '' %> PROVISIONING_PROFILE_SPECIFIER='<%= profile.provisioningProfileName %>' CODE_SIGN_IDENTITY='<%= profile.codeSignIdentity %>'",
       export_options: {
         method: "<%= profile.exportMethod %>",
         provisioningProfiles: {

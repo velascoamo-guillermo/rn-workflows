@@ -93,7 +93,9 @@ project:
 - `developmentTeam` renders `team_id("...")` in `fastlane/Appfile` and adds
   `DEVELOPMENT_TEAM=<team>` to the manual-signing `xcargs` of every iOS lane in
   `fastlane/Fastfile`, so `xcodebuild` can resolve the `match` signing identity
-  without a hand patch.
+  without a hand patch. When unset, `fastlane/Appfile` falls back to
+  `team_id(ENV["APPLE_TEAM_ID"])` so CI can still supply a team via the
+  environment.
 - `match` emits `fastlane/Matchfile` (`git_url`, `storage_mode`,
   `app_identifier` from `project.bundleId`). Omit it to keep the current
   behavior of not generating a Matchfile.

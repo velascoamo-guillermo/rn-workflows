@@ -63,7 +63,7 @@ function writeFiles(files: GeneratedFile[], { outDir, dryRun, secretsSummary }: 
     for (const req of secrets) {
       p.log.step(`${secretSetCommand(ci, req.name)} "<value>"`);
     }
-    p.log.info('Run `rn-workflows setup` to collect and upload these automatically.');
+    p.log.info('See SETUP.md for details. `rn-workflows setup` can collect and upload some of these for you.');
   }
   p.outro(dryRun ? 'Dry run complete.' : 'Done.');
 }

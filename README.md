@@ -125,10 +125,12 @@ iOS jobs also require `MATCH_PASSWORD` and `MATCH_GIT_URL` for code signing via 
 
 Given `ci: github-actions`:
 - `fastlane/Fastfile`, `fastlane/Appfile`, `fastlane/Pluginfile`, `Gemfile`
+- `fastlane/Matchfile` when `project.ios.match` is set
 - `.github/workflows/rn-<profile>.yml` for each profile
 
 Given `ci: gitlab`:
 - `fastlane/Fastfile`, `fastlane/Appfile`, `fastlane/Pluginfile`, `Gemfile`
+- `fastlane/Matchfile` when `project.ios.match` is set
 - `.gitlab-ci.yml` with one stage per profile × platform
 
 ## Monorepos (matrix mode)

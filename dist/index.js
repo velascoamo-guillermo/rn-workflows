@@ -773,80 +773,40 @@ function resolveMatrixWorkflowsDir(input) {
 }
 
 // src/utils/secrets.ts
-var FIREBASE_SERVICE_ACCOUNT = {
-  name: "FIREBASE_SERVICE_ACCOUNT_JSON",
-  description: "Firebase service account JSON (full file contents) with App Distribution admin access. Firebase console → Project settings → Service accounts → Generate new private key."
+var SECRET_DESCRIPTIONS = {
+  FIREBASE_APP_ID_ANDROID: "Firebase App Distribution app id for the Android app. Firebase console → Project settings → General → Your apps.",
+  FIREBASE_APP_ID_IOS: "Firebase App Distribution app id for the iOS app. Firebase console → Project settings → General → Your apps.",
+  FIREBASE_SERVICE_ACCOUNT_JSON: "Firebase service account JSON (full file contents) with App Distribution admin access. Firebase console → Project settings → Service accounts → Generate new private key.",
+  PLAY_STORE_JSON_KEY: "Google Play service account JSON key with Release Manager access. Play Console → Setup → API access → Service accounts.",
+  APP_STORE_CONNECT_API_KEY_PATH: 'A filesystem PATH, not the key content — fastlane\'s `api_key_path:` opens this file at build time. The generated workflow sets this env var directly to the secret VALUE without writing anything to disk first, so a secret holding raw .p8/JSON content will NOT work as-is. Until CI gains a "materialize key to file" step (tracked separately), point this at a location your CI job provisions the key file at (e.g. a path a prior step writes), or store the file content under a different secret and add that materialization step yourself. App Store Connect → Users and Access → Integrations → App Store Connect API.',
+  APPLE_TEAM_ID: "Your 10-character Apple Developer Team ID. Read by fastlane's Appfile as a fallback whenever `project.ios.developmentTeam` is left unset in rn-workflows.yml — but the generated CI workflow declares this secret unconditionally for every testflight/store iOS job regardless, so set it either way. App Store Connect → Membership.",
+  MATCH_PASSWORD: "Passphrase that decrypts the fastlane match certificates repo. Choose one when running `fastlane match init`.",
+  MATCH_GIT_URL: "Git URL of the private repo storing fastlane match's encrypted certificates, e.g. `https://github.com/org/certificates.git`. Read directly by fastlane's `match` action from the environment. If `project.ios.match.gitUrl` is set in rn-workflows.yml the generated Matchfile also carries the URL, but the CI workflow still declares this secret unconditionally — set it regardless.",
+  MATCH_GIT_BASIC_AUTHORIZATION: 'Base64-encoded `username:token` with read access to the match certificates repo, e.g. `echo -n "user:token" | base64`.',
+  GITHUB_TOKEN: "GitHub token with permission to create Releases on the app repo, used by the `github-releases` distribution target. On GitHub Actions the default `secrets.GITHUB_TOKEN` usually suffices (may need `contents: write` permission); on GitLab, create a personal access token against the GitHub repo instead.",
+  OTA_UPLOAD_KEY: "Shared upload key the OTA server accepts on `/api/upload`. Set the same value on the OTA server and here. Only rendered for GitHub Actions today — the gitlab-ci generator does not emit an OTA job."
 };
-var ANDROID_TARGET_SECRETS = {
-  firebase: [
-    {
-      name: "FIREBASE_APP_ID_ANDROID",
-      description: "Firebase App Distribution app id for the Android app. Firebase console → Project settings → General → Your apps."
-    },
-    FIREBASE_SERVICE_ACCOUNT
-  ],
-  testflight: [],
-  "github-releases": [],
-  store: [
-    {
-      name: "PLAY_STORE_JSON_KEY",
-      description: "Google Play service account JSON key with Release Manager access. Play Console → Setup → API access → Service accounts."
-    }
-  ]
-};
-var IOS_TARGET_SECRETS = {
-  firebase: [
-    {
-      name: "FIREBASE_APP_ID_IOS",
-      description: "Firebase App Distribution app id for the iOS app. Firebase console → Project settings → General → Your apps."
-    },
-    FIREBASE_SERVICE_ACCOUNT
-  ],
-  testflight: [
-    {
-      name: "APP_STORE_CONNECT_API_KEY_PATH",
-      description: "Path to the App Store Connect API key file fastlane uses to upload builds. App Store Connect → Users and Access → Integrations → App Store Connect API."
-    }
-  ],
-  "github-releases": [],
-  store: [
-    {
-      name: "APP_STORE_CONNECT_API_KEY_PATH",
-      description: "Path to the App Store Connect API key file fastlane uses to upload builds. App Store Connect → Users and Access → Integrations → App Store Connect API."
-    }
-  ]
-};
-var IOS_SIGNING_SECRETS2 = [
-  {
-    name: "MATCH_PASSWORD",
-    description: "Passphrase that decrypts the fastlane match certificates repo. Choose one when running `fastlane match init`."
-  },
-  {
-    name: "MATCH_GIT_BASIC_AUTHORIZATION",
-    description: 'Base64-encoded `username:token` with read access to the match certificates repo, e.g. `echo -n "user:token" | base64`.'
-  }
-];
-var OTA_SECRET = {
-  name: "OTA_UPLOAD_KEY",
-  description: "Shared upload key the OTA server accepts on `/api/upload`. Set the same value on the OTA server and here."
-};
+function requirement(name) {
+  const description = SECRET_DESCRIPTIONS[name];
+  if (!description)
+    throw new Error(`No description registered for secret "${name}" — add one to SECRET_DESCRIPTIONS.`);
+  return { name, description };
+}
 function deriveRequiredSecrets(config) {
   const required = new Map;
+  const isGithub = config.ci === "github-actions";
   for (const profile of Object.values(config.build)) {
-    const targets = profile.distribution.split("+").map((t) => t.trim());
     for (const platform of platformsFor(profile.platform)) {
-      const table = platform === "android" ? ANDROID_TARGET_SECRETS : IOS_TARGET_SECRETS;
-      for (const target of targets) {
-        for (const req of table[target] ?? [])
-          required.set(req.name, req);
+      for (const name of secretsFor(platform, profile.distribution)) {
+        required.set(name, requirement(name));
       }
-      if (platform === "ios") {
-        for (const req of IOS_SIGNING_SECRETS2)
-          required.set(req.name, req);
+      if (platform === "ios" && isGithub) {
+        required.set("MATCH_GIT_BASIC_AUTHORIZATION", requirement("MATCH_GIT_BASIC_AUTHORIZATION"));
       }
     }
-    if (profile.ota)
-      required.set(OTA_SECRET.name, OTA_SECRET);
+    if (profile.ota && isGithub) {
+      required.set("OTA_UPLOAD_KEY", requirement("OTA_UPLOAD_KEY"));
+    }
   }
   return [...required.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -860,7 +820,8 @@ function buildSetupMarkdown(secrets, ci) {
     "Auto-generated by `rn-workflows generate`. Regenerate with `npx rn-workflows generate`.",
     "",
     "These are the CI secrets the generated Fastlane and CI files read at build time.",
-    "`rn-workflows setup` can collect and upload most of these for you.",
+    "`rn-workflows setup` can collect and upload some of these for you — check each",
+    "entry below, since not every secret here has a setup step yet.",
     ""
   ];
   for (const req of secrets) {
@@ -905,7 +866,7 @@ function writeFiles(files, { outDir, dryRun, secretsSummary }) {
     for (const req of secrets) {
       p2.log.step(`${secretSetCommand(ci, req.name)} "<value>"`);
     }
-    p2.log.info("Run `rn-workflows setup` to collect and upload these automatically.");
+    p2.log.info("See SETUP.md for details. `rn-workflows setup` can collect and upload some of these for you.");
   }
   p2.outro(dryRun ? "Dry run complete." : "Done.");
 }

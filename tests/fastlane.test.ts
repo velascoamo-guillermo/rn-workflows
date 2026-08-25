@@ -77,6 +77,24 @@ describe('fastlane generator', () => {
   });
 });
 
+describe('App Store Connect API key handling (#37)', () => {
+  it('upload_to_testflight and upload_to_app_store rely on the shared api_key set in before_all, not a materialized file path', () => {
+    const cfg = parseConfig(fixture('production-all.yml'));
+    const fastfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Fastfile')!;
+    expect(fastfile.content).not.toContain('api_key_path');
+    expect(fastfile.content).not.toContain('APP_STORE_CONNECT_API_KEY_PATH');
+  });
+
+  it('before_all sets up app_store_connect_api_key from key_content env vars, never a file path', () => {
+    const cfg = parseConfig(fixture('production-all.yml'));
+    const fastfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Fastfile')!;
+    expect(fastfile.content).toContain('app_store_connect_api_key(');
+    expect(fastfile.content).toContain('key_id: ENV["ASC_KEY_ID"]');
+    expect(fastfile.content).toContain('issuer_id: ENV["ASC_ISSUER_ID"]');
+    expect(fastfile.content).toContain('key_content: ENV["ASC_KEY_CONTENT"]');
+  });
+});
+
 const fastfileFor = (name: string, options?: Parameters<typeof generateFastlane>[1]) =>
   generateFastlane(parseConfig(fixture(name)), options).find(
     (f) => f.path === 'fastlane/Fastfile',

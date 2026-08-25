@@ -44,9 +44,24 @@ export const IosBuildOptionsSchema = z.object({
   exportMethod: z.enum(['app-store', 'ad-hoc', 'development']).optional(),
 });
 
+// `ota.server`/`ota.channel` land unquoted (or double-quoted) inside a raw
+// shell `curl`/`-F` command in the generated GitHub Actions workflow — do not
+// rely on escaping there, reject unsafe characters up front instead.
+const OTA_SERVER_SAFE = /^[^\s"'`$;|&\\\n]+$/;
+const OTA_CHANNEL_SAFE = /^[A-Za-z0-9_.-]+$/;
+
 export const OtaConfigSchema = z.object({
-  server: z.string().min(1),
-  channel: z.string().min(1),
+  server: z
+    .string()
+    .min(1)
+    .regex(OTA_SERVER_SAFE, 'ota.server must not contain whitespace or shell metacharacters'),
+  channel: z
+    .string()
+    .min(1)
+    .regex(
+      OTA_CHANNEL_SAFE,
+      'ota.channel may only contain letters, digits, dot, hyphen, underscore',
+    ),
 });
 
 export type OtaConfig = z.infer<typeof OtaConfigSchema>;
@@ -70,17 +85,39 @@ export const MatchConfigSchema = z.object({
 
 export type MatchConfig = z.infer<typeof MatchConfigSchema>;
 
+// `developmentTeam` is interpolated into Fastfile's `xcargs:` string, itself
+// a shell command line fastlane passes to `xcodebuild` — escaping alone is
+// not enough there (see bundleId below), so this is a charset whitelist
+// matching Apple's real Team ID format instead.
+const TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/;
+
 export const IosProjectConfigSchema = z.object({
   /** Apple Developer Team ID, e.g. "AB12CD34EF". App-wide, not per-profile. */
-  developmentTeam: z.string().min(1, 'developmentTeam cannot be empty').optional(),
+  developmentTeam: z
+    .string()
+    .min(1, 'developmentTeam cannot be empty')
+    .regex(TEAM_ID_PATTERN, 'developmentTeam must be a 10-character Apple Team ID (A-Z, 0-9)')
+    .optional(),
   match: MatchConfigSchema.optional(),
 });
 
 export type IosProjectConfig = z.infer<typeof IosProjectConfigSchema>;
 
+// bundleId is interpolated into Fastfile's `xcargs:` shell string inside a
+// single-quoted PROVISIONING_PROFILE_SPECIFIER value — escaping can't safely
+// undo a value that breaks out of that shell quoting, so this is a charset
+// whitelist (standard reverse-DNS bundle id shape) rather than an escape.
+const BUNDLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+
 export const ProjectSchema = z.object({
   type: ProjectTypeSchema,
-  bundleId: z.string().min(1),
+  bundleId: z
+    .string()
+    .min(1)
+    .regex(
+      BUNDLE_ID_PATTERN,
+      'bundleId may only contain letters, digits, dot, hyphen, underscore (unsafe otherwise for shell/xcargs interpolation)',
+    ),
   packageName: z.string().min(1),
   /**
    * Xcode scheme / project name, i.e. `ios/<scheme>.xcworkspace`.
@@ -123,6 +160,8 @@ export interface Config {
   extraPaths?: string[];
 }
 
+const BUILD_PROFILE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*$/;
+
 export const ConfigSchema = z
   .object({
     project: ProjectSchema,
@@ -140,6 +179,18 @@ export const ConfigSchema = z
       });
     }
     for (const [name, profile] of profiles) {
+      // Build profile keys become a bare Fastlane lane name (`lane :<name>`)
+      // and a raw shell argument (`bundle exec fastlane <platform> <name>`)
+      // in the generated CI scripts. Neither position can be safely escaped
+      // after the fact, so the charset is whitelisted up front.
+      if (!BUILD_PROFILE_NAME_PATTERN.test(name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['build', name],
+          message: `build profile name "${name}" may only contain letters, digits, hyphen, underscore, and must start with a letter (unsafe otherwise as a Fastlane lane name / shell argument)`,
+        });
+      }
+
       const targets = profile.distribution.split('+').map((s) => s.trim());
       const touchesIos = profile.platform === 'ios' || profile.platform === 'all';
       const touchesAndroid = profile.platform === 'android' || profile.platform === 'all';

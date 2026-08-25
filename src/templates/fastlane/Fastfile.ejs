@@ -59,6 +59,9 @@ platform :ios do
       xcargs: "CODE_SIGN_STYLE=Manual<%= developmentTeam ? ` DEVELOPMENT_TEAM=${developmentTeam}` : '' %> PROVISIONING_PROFILE_SPECIFIER='<%= profile.provisioningProfileName %>' CODE_SIGN_IDENTITY='<%= profile.codeSignIdentity %>'",
       export_options: {
         method: "<%= profile.exportMethod %>",
+<% if (developmentTeam) { -%>
+        teamID: "<%= developmentTeam %>",
+<% } -%>
         provisioningProfiles: {
           "<%= bundleId %>" => "<%= profile.provisioningProfileName %>"
         }

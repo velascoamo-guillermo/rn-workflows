@@ -146,7 +146,34 @@ function runMatrix(args: {
     `Matrix mode: ${apps.length} app(s) — ${apps.map((app) => app.slug).join(', ')}`,
   );
   const file = generateMatrixWorkflow(apps, { packageManager, workflowsDir });
-  writeFiles([file], { outDir: gitRoot, dryRun: args.dryRun });
+
+  // Union of every discovered app's required secrets, deduped by name —
+  // the matrix workflow is one file covering all of them, so its SETUP.md
+  // and terminal summary must cover all of them too (deferred from #30).
+  const requiredSecrets = dedupeSecretsByName(
+    apps.flatMap((app) => deriveRequiredSecrets(app.config)),
+  );
+
+  const files: GeneratedFile[] = [
+    file,
+    ...(requiredSecrets.length > 0
+      ? [{ path: 'SETUP.md', content: buildSetupMarkdown(requiredSecrets, 'github-actions') }]
+      : []),
+  ];
+
+  writeFiles(files, {
+    outDir: gitRoot,
+    dryRun: args.dryRun,
+    secretsSummary: { secrets: requiredSecrets, ci: 'github-actions' },
+  });
+}
+
+function dedupeSecretsByName(
+  secrets: ReturnType<typeof deriveRequiredSecrets>,
+): ReturnType<typeof deriveRequiredSecrets> {
+  const byName = new Map<string, ReturnType<typeof deriveRequiredSecrets>[number]>();
+  for (const secret of secrets) byName.set(secret.name, secret);
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export default defineCommand({

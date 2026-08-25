@@ -192,6 +192,20 @@ describe('expo prebuild runs outside the bundler env', () => {
     expect(content).toContain('if defined?(Bundler)');
   });
 
+  it('uses the bun expo prebuild invocation when packageManager is bun', () => {
+    const content = fastfileFor('expo-pawlog.yml', { scheme: 'Pawlog', packageManager: 'bun' });
+    expect(content).toContain('bun expo prebuild --platform ios --clean');
+    expect(content).not.toContain('yarn expo prebuild');
+    expect(content).not.toContain('npx expo prebuild');
+  });
+
+  it('uses the npx expo prebuild invocation when packageManager is npm', () => {
+    const content = fastfileFor('expo-pawlog.yml', { scheme: 'Pawlog', packageManager: 'npm' });
+    expect(content).toContain('npx expo prebuild --platform ios --clean');
+    expect(content).not.toContain('bun expo prebuild');
+    expect(content).not.toContain('yarn expo prebuild');
+  });
+
   it('calls prebuild before build_app in expo ios lanes', () => {
     const content = fastfileFor('expo-pawlog.yml', { scheme: 'Pawlog' });
     const lanesIndex = content.indexOf('lane :production do');

@@ -14,7 +14,13 @@ describe('deriveRequiredSecrets', () => {
       build: { production: { platform: 'ios', distribution: 'testflight' } },
     };
     expect(names(config).sort()).toEqual(
-      ['APP_STORE_CONNECT_API_KEY_PATH', 'MATCH_GIT_BASIC_AUTHORIZATION', 'MATCH_PASSWORD'].sort(),
+      [
+        'APPLE_TEAM_ID',
+        'APP_STORE_CONNECT_API_KEY_PATH',
+        'MATCH_GIT_BASIC_AUTHORIZATION',
+        'MATCH_GIT_URL',
+        'MATCH_PASSWORD',
+      ].sort(),
     );
   });
 
@@ -37,11 +43,13 @@ describe('deriveRequiredSecrets', () => {
     };
     expect(names(config).sort()).toEqual(
       [
+        'APPLE_TEAM_ID',
         'APP_STORE_CONNECT_API_KEY_PATH',
         'FIREBASE_APP_ID_ANDROID',
         'FIREBASE_APP_ID_IOS',
         'FIREBASE_SERVICE_ACCOUNT_JSON',
         'MATCH_GIT_BASIC_AUTHORIZATION',
+        'MATCH_GIT_URL',
         'MATCH_PASSWORD',
       ].sort(),
     );
@@ -62,11 +70,20 @@ describe('deriveRequiredSecrets', () => {
     expect(names(config).sort()).toEqual(['OTA_UPLOAD_KEY', 'PLAY_STORE_JSON_KEY'].sort());
   });
 
-  it('android github-releases distribution requires zero secrets (nothing rendered reads one)', () => {
+  it('android github-releases distribution requires GITHUB_TOKEN (rendered as a job secret)', () => {
     const config: Config = {
       project: { type: 'bare', bundleId: 'com.test', packageName: 'com.test' },
       ci: 'github-actions',
       build: { staging: { platform: 'android', distribution: 'github-releases' } },
+    };
+    expect(names(config)).toEqual(['GITHUB_TOKEN']);
+  });
+
+  it('a target with no rendered secrets requires zero (out-of-schema android+testflight, since the CLI rejects that combo)', () => {
+    const config: Config = {
+      project: { type: 'bare', bundleId: 'com.test', packageName: 'com.test' },
+      ci: 'github-actions',
+      build: { staging: { platform: 'android', distribution: 'testflight' } },
     };
     expect(deriveRequiredSecrets(config)).toEqual([]);
   });

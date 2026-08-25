@@ -62,16 +62,14 @@ describe('generate CI secrets summary + SETUP.md (CLI)', () => {
     }
   });
 
-  test('omits SETUP.md and the summary when zero secrets are required', () => {
-    const { root, appDir } = makeRepo('github-releases');
-    try {
-      const output = runGenerate(appDir);
-      expect(existsSync(join(appDir, 'SETUP.md'))).toBe(false);
-      expect(output).not.toContain('Required CI secrets');
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+  // "omits SETUP.md when zero secrets are required" used to be tested here
+  // via `platform: android, distribution: github-releases`. Post-review-fix
+  // that combo now correctly requires GITHUB_TOKEN (see #30 review item 3),
+  // and no other schema-valid (platform, distribution) combination maps to
+  // zero secrets, so the zero-secrets branch in generate.ts can no longer be
+  // reached through a valid rn-workflows.yml. It's still covered at the unit
+  // level — deriveRequiredSecrets([]) for an out-of-schema config — in
+  // tests/secrets-derive.test.ts.
 
   test('--dry-run reports SETUP.md without writing it', () => {
     const { root, appDir } = makeRepo('firebase');

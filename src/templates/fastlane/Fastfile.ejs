@@ -17,8 +17,8 @@ end
 
 <% for (const profile of androidProfiles) { -%>
 platform :android do
-  desc "<%= profile.description %>"
-  lane :<%= profile.name %> do
+  desc "<%- rubyString(profile.description) %>"
+  lane <%- rubySymbol(profile.name) %> do
     gradle(
       task: "<%= profile.gradleTask %>",
       build_type: "Release",
@@ -36,7 +36,7 @@ platform :android do
 <% if (profile.targets.includes('store')) { -%>
     upload_to_play_store(
       json_key_data: ENV["PLAY_STORE_JSON_KEY"],
-      package_name: "<%= packageName %>",
+      package_name: "<%- rubyString(packageName) %>",
       track: "production",
       aab: "<%= profile.androidArtifactPath %>"
     )
@@ -47,26 +47,26 @@ end
 <% } -%>
 <% for (const profile of iosProfiles) { -%>
 platform :ios do
-  desc "<%= profile.description %>"
-  lane :<%= profile.name %> do
+  desc "<%- rubyString(profile.description) %>"
+  lane <%- rubySymbol(profile.name) %> do
     setup_ci if ENV["CI"]
 <% if (projectType === 'expo') { -%>
     prebuild
 <% } -%>
     match(type: "<%= profile.matchType %>", readonly: ENV.fetch("MATCH_READONLY", "true") == "true") if ENV["MATCH_PASSWORD"]
     build_app(
-      workspace: "ios/<%= profile.xcWorkspace %>.xcworkspace",
-      scheme: "<%= profile.xcScheme %>",
+      workspace: "ios/<%- rubyString(profile.xcWorkspace) %>.xcworkspace",
+      scheme: "<%- rubyString(profile.xcScheme) %>",
       export_method: "<%= profile.exportMethod %>",
       output_directory: "ios/build",
-      xcargs: "CODE_SIGN_STYLE=Manual<%= developmentTeam ? ` DEVELOPMENT_TEAM=${developmentTeam}` : '' %> PROVISIONING_PROFILE_SPECIFIER='<%= profile.provisioningProfileName %>' CODE_SIGN_IDENTITY='<%= profile.codeSignIdentity %>'",
+      xcargs: "CODE_SIGN_STYLE=Manual<%- developmentTeam ? ` DEVELOPMENT_TEAM=${rubyString(developmentTeam)}` : '' %> PROVISIONING_PROFILE_SPECIFIER='<%- rubyString(profile.provisioningProfileName) %>' CODE_SIGN_IDENTITY='<%= profile.codeSignIdentity %>'",
       export_options: {
         method: "<%= profile.exportMethod %>",
 <% if (developmentTeam) { -%>
-        teamID: "<%= developmentTeam %>",
+        teamID: "<%- rubyString(developmentTeam) %>",
 <% } -%>
         provisioningProfiles: {
-          "<%= bundleId %>" => "<%= profile.provisioningProfileName %>"
+          "<%- rubyString(bundleId) %>" => "<%- rubyString(profile.provisioningProfileName) %>"
         }
       }
     )

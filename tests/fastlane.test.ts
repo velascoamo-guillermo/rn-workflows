@@ -325,3 +325,45 @@ describe('developmentTeam signing', () => {
     expect(appfile.content).toContain('team_id(ENV["APPLE_TEAM_ID"]) if ENV["APPLE_TEAM_ID"]');
   });
 });
+
+describe('EJS escaping of hostile-but-legal config values (#35)', () => {
+  it('renders gitUrl with & and embedded quotes raw, not HTML-escaped, in Matchfile', () => {
+    const cfg = parseConfig(fixture('ios-signing-hostile.yml'));
+    const matchfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Matchfile')!;
+    expect(matchfile.content).toContain(
+      'git_url("https://user:pa\\"ss@github.com/org/repo.git?a=1&b=2")',
+    );
+    expect(matchfile.content).not.toContain('&amp;');
+    expect(matchfile.content).not.toContain('&#34;');
+    expect(matchfile.content).not.toContain('&quot;');
+  });
+
+  it('escapes an embedded quote in packageName instead of HTML-entity-encoding it', () => {
+    const cfg = parseConfig(fixture('ios-signing-hostile.yml'));
+    const appfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Appfile')!;
+    expect(appfile.content).toContain('package_name("com.gvelasco.\\"pawlog\\"")');
+    expect(appfile.content).not.toContain('&#34;');
+  });
+
+  it('escapes an embedded quote in project.scheme within the Fastfile workspace/scheme strings', () => {
+    const cfg = parseConfig(fixture('ios-signing-hostile.yml'));
+    const fastfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Fastfile')!;
+    expect(fastfile.content).toContain('workspace: "ios/My \\"Special\\" Scheme.xcworkspace",');
+    expect(fastfile.content).toContain('scheme: "My \\"Special\\" Scheme",');
+    expect(fastfile.content).not.toContain('&#34;');
+  });
+
+  it('uses a quoted Ruby symbol (not a broken bare lane) for a hostile build profile name', () => {
+    const cfg = parseConfig(fixture('production-all.yml'));
+    // Bypass schema validation deliberately: the template's own escaping is
+    // a second line of defense independent of the schema-level charset
+    // whitelist covering this same field.
+    const hostileCfg = {
+      ...cfg,
+      build: { 'my "cool" profile': cfg.build.production! },
+    };
+    const fastfile = generateFastlane(hostileCfg).find((f) => f.path === 'fastlane/Fastfile')!;
+    expect(fastfile.content).toContain('lane :"my \\"cool\\" profile" do');
+    expect(fastfile.content).not.toContain('&#34;');
+  });
+});

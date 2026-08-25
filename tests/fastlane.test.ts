@@ -228,4 +228,27 @@ describe('developmentTeam signing', () => {
       "xcargs: \"CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER='match AppStore com.gvelasco.pawlog' CODE_SIGN_IDENTITY='Apple Distribution'\",",
     );
   });
+
+  it('adds teamID to export_options when developmentTeam is set', () => {
+    const content = fastfileFor('ios-signing.yml');
+    expect(content).toContain('teamID: "AB12CD34EF"');
+  });
+
+  it('omits teamID from export_options when developmentTeam is unset', () => {
+    const content = fastfileFor('expo-pawlog-scheme.yml');
+    expect(content).not.toContain('teamID:');
+  });
+
+  it('renders a literal team_id in Appfile when developmentTeam is set (explicit wins)', () => {
+    const cfg = parseConfig(fixture('ios-signing.yml'));
+    const appfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Appfile')!;
+    expect(appfile.content).toContain('team_id("AB12CD34EF")');
+    expect(appfile.content).not.toContain('ENV["APPLE_TEAM_ID"]');
+  });
+
+  it('keeps the ENV-based team_id fallback in Appfile when developmentTeam is unset', () => {
+    const cfg = parseConfig(fixture('production-all.yml'));
+    const appfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Appfile')!;
+    expect(appfile.content).toContain('team_id(ENV["APPLE_TEAM_ID"]) if ENV["APPLE_TEAM_ID"]');
+  });
 });

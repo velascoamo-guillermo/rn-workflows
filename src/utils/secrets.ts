@@ -31,7 +31,9 @@ const SECRET_DESCRIPTIONS: Record<string, string> = {
   ASC_ISSUER_ID:
     'App Store Connect API issuer ID (UUID shown above the keys table). App Store Connect → Users and Access → Integrations → App Store Connect API.',
   ASC_KEY_CONTENT:
-    'Full contents of the downloaded .p8 private key file, pasted as-is (raw, not base64) — fastlane\'s `app_store_connect_api_key(key_content:)` reads it directly from this env var, no file materialization step needed. App Store Connect → Users and Access → Integrations → App Store Connect API → generate/download a key (only downloadable once, so save it).',
+    'Contents of the downloaded .p8 private key file — raw by default, or base64-encoded if ASC_KEY_IS_BASE64 is "true". fastlane\'s `app_store_connect_api_key(key_content:)` reads it directly from this env var, no file materialization step needed. App Store Connect → Users and Access → Integrations → App Store Connect API → generate/download a key (only downloadable once, so save it).',
+  ASC_KEY_IS_BASE64:
+    'Set to "true" when ASC_KEY_CONTENT is stored base64-encoded, "false" (or unset) for raw .p8 contents. The .p8 file is multiline and most CI secret stores (notably GitLab, whose masking rejects multiline values) can\'t mask it as-is — base64-encoding collapses it to one line so it can be masked. `rn-workflows setup` offers to encode it for you.',
   APPLE_TEAM_ID:
     'Your 10-character Apple Developer Team ID. Read by fastlane\'s Appfile as a fallback whenever `project.ios.developmentTeam` is left unset in rn-workflows.yml — but the generated CI workflow declares this secret unconditionally for every testflight/store iOS job regardless, so set it either way. App Store Connect → Membership.',
   MATCH_PASSWORD:

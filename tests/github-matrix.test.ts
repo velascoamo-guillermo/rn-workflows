@@ -279,6 +279,19 @@ describe('generateMatrixWorkflow', () => {
     expect(String(cache.if)).not.toContain('matrix.otaUpload');
   });
 
+  test('release job does not duplicate expo prebuild / pod install — fastlane prebuild lane owns it', () => {
+    const { file, parsed } = renderMatrix();
+    const release = parsed.jobs['release']!;
+    const prebuildStep = release.steps.find((s) => s.name === 'Expo Prebuild (iOS)');
+    const podStep = release.steps.find((s) => s.name === 'Install Pods');
+    const androidPrebuildStep = release.steps.find((s) => s.name === 'Expo Prebuild (Android)');
+    expect(prebuildStep).toBeUndefined();
+    expect(podStep).toBeUndefined();
+    expect(androidPrebuildStep).toBeUndefined();
+    expect(file.content).not.toContain('expo prebuild');
+    expect(file.content).not.toContain('pod install');
+  });
+
   test('quality matrix has one leg per app with checks enabled', () => {
     const { parsed } = renderMatrix();
     const legs = legsFromEnv<QualityLeg>(parsed, 'QUALITY_LEGS');

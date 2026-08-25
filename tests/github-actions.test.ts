@@ -135,4 +135,19 @@ describe('generateGithubActions', () => {
     expect(content).toContain('npm ci');
     expect(content).toContain('cache: npm');
   });
+
+  test('ios job does not duplicate expo prebuild / pod install — fastlane prebuild lane owns it', () => {
+    const config: Config = {
+      ...baseConfig,
+      build: { preview: { platform: 'ios', distribution: 'testflight' } },
+    };
+    const { content } = generateGithubActions(config)[0]!;
+    expect(content).not.toContain('expo prebuild');
+    expect(content).not.toContain('pod install');
+  });
+
+  test('android job does not duplicate expo prebuild — fastlane prebuild lane owns it', () => {
+    const { content } = generateGithubActions(baseConfig)[0]!;
+    expect(content).not.toContain('expo prebuild');
+  });
 });

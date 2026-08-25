@@ -90,4 +90,10 @@ describe('generateGithubActions with OTA', () => {
     const { content } = generateGithubActions(baseOtaConfig)[0]!;
     expect(content).toMatchSnapshot();
   });
+
+  test('ios/android jobs do not duplicate expo prebuild / pod install — fastlane prebuild lane owns it', () => {
+    const { content } = generateGithubActions(baseOtaConfig)[0]!;
+    expect(content).not.toContain('expo prebuild');
+    expect(content).not.toContain('pod install');
+  });
 });

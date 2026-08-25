@@ -40,9 +40,6 @@ jobs:
       - name: Install JS dependencies
         run: yarn install --frozen-lockfile
 
-      - name: Expo Prebuild (Android)
-        run: npx expo prebuild --platform android --no-install
-
       - name: Run Fastlane lane preview (android)
         run: bundle exec fastlane android preview
         env:
@@ -91,12 +88,6 @@ jobs:
 
       - name: Install JS dependencies
         run: yarn install --frozen-lockfile
-
-      - name: Expo Prebuild (iOS)
-        run: npx expo prebuild --platform ios --no-install
-
-      - name: Install Pods
-        run: cd ios && pod install --repo-update
 
       - name: Run Fastlane lane preview (ios)
         run: bundle exec fastlane ios preview

@@ -184,18 +184,6 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Expo Prebuild (iOS)
-        if: ${{ matrix.platform == 'ios'<%- skipHit %> }}
-        run: npx expo prebuild --platform ios --no-install
-
-      - name: Install Pods
-        if: ${{ matrix.platform == 'ios'<%- skipHit %> }}
-        run: cd ios && pod install --repo-update
-
-      - name: Expo Prebuild (Android)
-        if: ${{ matrix.platform == 'android'<%- skipHit %> }}
-        run: npx expo prebuild --platform android --no-install
-
       - name: Run Fastlane lane
 <% if (hasOta) { -%>
         if: ${{ steps.fp-cache.outputs.cache-hit != 'true' }}

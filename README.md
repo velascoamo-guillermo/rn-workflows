@@ -77,6 +77,29 @@ Resolution order:
    `expo prebuild` sanitizes it (`My App` → `MyApp`), when `project.type: expo`
 3. last segment of `bundleId` (legacy fallback)
 
+### `project.ios`
+
+App-wide iOS signing config (not per build profile):
+
+```yaml
+project:
+  ios:
+    developmentTeam: AB12CD34EF   # optional — Apple Developer Team ID
+    match:
+      gitUrl: https://github.com/myorg/certificates.git  # required if `match` is set
+      storageMode: git            # optional — only "git" is supported today
+```
+
+- `developmentTeam` renders `team_id("...")` in `fastlane/Appfile` and adds
+  `DEVELOPMENT_TEAM=<team>` to the manual-signing `xcargs` of every iOS lane in
+  `fastlane/Fastfile`, so `xcodebuild` can resolve the `match` signing identity
+  without a hand patch. When unset, `fastlane/Appfile` falls back to
+  `team_id(ENV["APPLE_TEAM_ID"])` so CI can still supply a team via the
+  environment.
+- `match` emits `fastlane/Matchfile` (`git_url`, `storage_mode`,
+  `app_identifier` from `project.bundleId`). Omit it to keep the current
+  behavior of not generating a Matchfile.
+
 ## Supported distributions
 
 | Key | Target |
@@ -106,10 +129,12 @@ iOS jobs also require `MATCH_PASSWORD` and `MATCH_GIT_URL` for code signing via 
 
 Given `ci: github-actions`:
 - `fastlane/Fastfile`, `fastlane/Appfile`, `fastlane/Pluginfile`, `Gemfile`
+- `fastlane/Matchfile` when `project.ios.match` is set
 - `.github/workflows/rn-<profile>.yml` for each profile
 
 Given `ci: gitlab`:
 - `fastlane/Fastfile`, `fastlane/Appfile`, `fastlane/Pluginfile`, `Gemfile`
+- `fastlane/Matchfile` when `project.ios.match` is set
 - `.gitlab-ci.yml` with one stage per profile × platform
 
 Either way, `SETUP.md` is added next to `fastlane/` whenever the config requires at least one CI secret.

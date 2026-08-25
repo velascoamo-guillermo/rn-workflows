@@ -247,3 +247,96 @@ build:
     ).toThrow(ConfigError);
   });
 });
+
+describe('project.ios signing config', () => {
+  it('parses project.ios.developmentTeam and project.ios.match.gitUrl', () => {
+    const cfg = parseConfig(fixture('ios-signing.yml'));
+    expect(cfg.project.ios?.developmentTeam).toBe('AB12CD34EF');
+    expect(cfg.project.ios?.match?.gitUrl).toBe(
+      'https://github.com/gvelasco/certificates.git',
+    );
+  });
+
+  it('leaves project.ios undefined when absent (existing fixtures unaffected)', () => {
+    const cfg = parseConfig(fixture('preview-android.yml'));
+    expect(cfg.project.ios).toBeUndefined();
+  });
+
+  it('defaults storageMode to undefined when omitted, letting the generator apply "git"', () => {
+    const cfg = parseConfig(fixture('ios-signing.yml'));
+    expect(cfg.project.ios?.match?.storageMode).toBeUndefined();
+  });
+
+  it('accepts an explicit storageMode of "git"', () => {
+    const raw = `
+project:
+  type: bare
+  bundleId: com.myapp
+  packageName: com.myapp
+  ios:
+    match:
+      gitUrl: https://github.com/myorg/certs.git
+      storageMode: git
+ci: github-actions
+build:
+  preview:
+    platform: ios
+    distribution: testflight
+`;
+    const cfg = parseConfig(raw);
+    expect(cfg.project.ios?.match?.storageMode).toBe('git');
+  });
+
+  it('rejects an unsupported storageMode', () => {
+    const raw = `
+project:
+  type: bare
+  bundleId: com.myapp
+  packageName: com.myapp
+  ios:
+    match:
+      gitUrl: https://github.com/myorg/certs.git
+      storageMode: s3
+ci: github-actions
+build:
+  preview:
+    platform: ios
+    distribution: testflight
+`;
+    expect(() => parseConfig(raw)).toThrow(ConfigError);
+  });
+
+  it('rejects a match block without gitUrl', () => {
+    const raw = `
+project:
+  type: bare
+  bundleId: com.myapp
+  packageName: com.myapp
+  ios:
+    match: {}
+ci: github-actions
+build:
+  preview:
+    platform: ios
+    distribution: testflight
+`;
+    expect(() => parseConfig(raw)).toThrow(ConfigError);
+  });
+
+  it('rejects an empty developmentTeam string', () => {
+    const raw = `
+project:
+  type: bare
+  bundleId: com.myapp
+  packageName: com.myapp
+  ios:
+    developmentTeam: ''
+ci: github-actions
+build:
+  preview:
+    platform: ios
+    distribution: testflight
+`;
+    expect(() => parseConfig(raw)).toThrow(ConfigError);
+  });
+});

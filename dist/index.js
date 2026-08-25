@@ -71,11 +71,20 @@ var BuildProfileSchema = z.object({
   ios: IosBuildOptionsSchema.optional(),
   ota: OtaConfigSchema.optional()
 });
+var MatchConfigSchema = z.object({
+  gitUrl: z.string().min(1, "match.gitUrl cannot be empty"),
+  storageMode: z.literal("git").optional()
+});
+var IosProjectConfigSchema = z.object({
+  developmentTeam: z.string().min(1, "developmentTeam cannot be empty").optional(),
+  match: MatchConfigSchema.optional()
+});
 var ProjectSchema = z.object({
   type: ProjectTypeSchema,
   bundleId: z.string().min(1),
   packageName: z.string().min(1),
-  scheme: z.string().min(1).optional()
+  scheme: z.string().min(1).optional(),
+  ios: IosProjectConfigSchema.optional()
 });
 var ChecksSchema = z.object({
   test: z.boolean().optional(),
@@ -433,6 +442,8 @@ function toIosView(name, profile, bundleId, scheme) {
 function generateFastlane(config, options = {}) {
   const packageManager = options.packageManager ?? "yarn";
   const scheme = resolveScheme(config, options.scheme);
+  const developmentTeam = config.project.ios?.developmentTeam;
+  const match = config.project.ios?.match;
   const androidProfiles = [];
   const iosProfiles = [];
   for (const [name, profile] of Object.entries(config.build)) {
@@ -455,22 +466,33 @@ function generateFastlane(config, options = {}) {
     usesFirebase: allTargets.has("firebase"),
     hasIos: iosProfiles.length > 0,
     hasAndroidFirebase: androidProfiles.some((p2) => p2.targets.includes("firebase")),
-    hasIosFirebase: iosProfiles.some((p2) => p2.targets.includes("firebase"))
+    hasIosFirebase: iosProfiles.some((p2) => p2.targets.includes("firebase")),
+    developmentTeam
   });
   const appfile = renderTemplate("fastlane/Appfile.ejs", {
     bundleId: config.project.bundleId,
-    packageName: config.project.packageName
+    packageName: config.project.packageName,
+    developmentTeam
   });
   const gemfile = renderTemplate("fastlane/Gemfile.ejs", {});
   const pluginfile = renderTemplate("fastlane/Pluginfile.ejs", {
     usesFirebase: allTargets.has("firebase")
   });
-  return [
+  const files = [
     { path: "fastlane/Fastfile", content: fastfile },
     { path: "fastlane/Appfile", content: appfile },
     { path: "fastlane/Pluginfile", content: pluginfile },
     { path: "Gemfile", content: gemfile }
   ];
+  if (match) {
+    const matchfile = renderTemplate("fastlane/Matchfile.ejs", {
+      gitUrl: match.gitUrl,
+      storageMode: match.storageMode ?? "git",
+      bundleId: config.project.bundleId
+    });
+    files.push({ path: "fastlane/Matchfile", content: matchfile });
+  }
+  return files;
 }
 
 // src/secrets.ts

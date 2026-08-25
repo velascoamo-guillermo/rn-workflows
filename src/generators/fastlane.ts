@@ -112,6 +112,8 @@ export function generateFastlane(
 ): GeneratedFile[] {
   const packageManager = options.packageManager ?? 'yarn';
   const scheme = resolveScheme(config, options.scheme);
+  const developmentTeam = config.project.ios?.developmentTeam;
+  const match = config.project.ios?.match;
   const androidProfiles: AndroidProfileView[] = [];
   const iosProfiles: IosProfileView[] = [];
 
@@ -140,11 +142,13 @@ export function generateFastlane(
     hasIos: iosProfiles.length > 0,
     hasAndroidFirebase: androidProfiles.some((p) => p.targets.includes('firebase')),
     hasIosFirebase: iosProfiles.some((p) => p.targets.includes('firebase')),
+    developmentTeam,
   });
 
   const appfile = renderTemplate('fastlane/Appfile.ejs', {
     bundleId: config.project.bundleId,
     packageName: config.project.packageName,
+    developmentTeam,
   });
 
   const gemfile = renderTemplate('fastlane/Gemfile.ejs', {});
@@ -153,10 +157,21 @@ export function generateFastlane(
     usesFirebase: allTargets.has('firebase'),
   });
 
-  return [
+  const files: GeneratedFile[] = [
     { path: 'fastlane/Fastfile', content: fastfile },
     { path: 'fastlane/Appfile', content: appfile },
     { path: 'fastlane/Pluginfile', content: pluginfile },
     { path: 'Gemfile', content: gemfile },
   ];
+
+  if (match) {
+    const matchfile = renderTemplate('fastlane/Matchfile.ejs', {
+      gitUrl: match.gitUrl,
+      storageMode: match.storageMode ?? 'git',
+      bundleId: config.project.bundleId,
+    });
+    files.push({ path: 'fastlane/Matchfile', content: matchfile });
+  }
+
+  return files;
 }

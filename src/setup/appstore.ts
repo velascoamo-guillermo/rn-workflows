@@ -1,7 +1,7 @@
 // src/setup/appstore.ts
 import { existsSync, readFileSync } from 'node:fs';
 import type { SetupContext, StepResult } from './types.ts';
-import { promptText } from './prompts.ts';
+import { promptText, promptConfirm } from './prompts.ts';
 
 export function makeAppStoreStep() {
   return {
@@ -27,7 +27,18 @@ export function makeAppStoreStep() {
 
       const keyPath = await promptText('Path to the downloaded .p8 App Store Connect API key file');
       if (!existsSync(keyPath)) throw new Error(`File not found: ${keyPath}`);
-      ctx.collectedSecrets['ASC_KEY_CONTENT'] = readFileSync(keyPath, 'utf8');
+      const keyContent = readFileSync(keyPath, 'utf8');
+
+      // The .p8 is a multiline PEM file. Most CI secret stores can mask a
+      // single-line value but not a multiline one (GitLab in particular) —
+      // base64-encoding collapses it to one line so it can be masked.
+      const useBase64 = await promptConfirm(
+        'Store the key as base64? (recommended for GitLab — multiline secrets cannot be masked there)',
+      );
+      ctx.collectedSecrets['ASC_KEY_CONTENT'] = useBase64
+        ? Buffer.from(keyContent, 'utf8').toString('base64')
+        : keyContent;
+      ctx.collectedSecrets['ASC_KEY_IS_BASE64'] = useBase64 ? 'true' : 'false';
 
       return { skipped: false };
     },

@@ -1,18 +1,17 @@
 import type { Config } from '../config/types.ts';
-import { secretsFor, platformsFor } from '../secrets.ts';
+import { deriveRequiredSecrets } from '../utils/secrets.ts';
 import type { SetupContext, StepResult } from './types.ts';
 import { shell, isAvailable } from './shell.ts';
 
+/**
+ * Names of every secret `setup` should collect/upload for this config.
+ * Delegates entirely to `deriveRequiredSecrets` (src/utils/secrets.ts) —
+ * the same derivation the `generate` command and SETUP.md use — so this
+ * can never drift into a second, hand-maintained set of names. See
+ * tests/setup-secrets.test.ts for the cross-check pinning the two together.
+ */
 export function collectRequiredSecrets(config: Config): string[] {
-  const set = new Set<string>();
-  for (const profile of Object.values(config.build)) {
-    for (const platform of platformsFor(profile.platform)) {
-      for (const s of secretsFor(platform, profile.distribution)) {
-        set.add(s);
-      }
-    }
-  }
-  return [...set].sort();
+  return deriveRequiredSecrets(config).map((s) => s.name);
 }
 
 export function makeSecretsStep() {

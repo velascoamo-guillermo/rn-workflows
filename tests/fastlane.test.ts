@@ -196,6 +196,16 @@ describe('expo prebuild runs outside the bundler env', () => {
     expect(prebuildCallIndex).toBeLessThan(buildAppIndex);
   });
 
+  it('runs setup_ci before prebuild in expo ios lanes', () => {
+    const content = fastfileFor('expo-pawlog.yml', { scheme: 'Pawlog' });
+    const lanesIndex = content.indexOf('lane :production do');
+    const setupCiIndex = content.indexOf('setup_ci if ENV["CI"]', lanesIndex);
+    const prebuildCallIndex = content.indexOf('\n    prebuild\n', lanesIndex);
+    expect(setupCiIndex).toBeGreaterThan(-1);
+    expect(prebuildCallIndex).toBeGreaterThan(-1);
+    expect(setupCiIndex).toBeLessThan(prebuildCallIndex);
+  });
+
   it('leaves bare (non-expo) projects unaffected', () => {
     const content = fastfileFor('ios-development.yml');
     expect(content).not.toContain('private_lane :prebuild');

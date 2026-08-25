@@ -38,8 +38,8 @@ end
 platform :ios do
   desc "Build production (ios)"
   lane :production do
-    prebuild
     setup_ci if ENV["CI"]
+    prebuild
     match(type: "appstore", readonly: ENV.fetch("MATCH_READONLY", "true") == "true") if ENV["MATCH_PASSWORD"]
     build_app(
       workspace: "ios/Pawlog.xcworkspace",

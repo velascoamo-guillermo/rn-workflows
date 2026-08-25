@@ -49,10 +49,10 @@ end
 platform :ios do
   desc "<%= profile.description %>"
   lane :<%= profile.name %> do
+    setup_ci if ENV["CI"]
 <% if (projectType === 'expo') { -%>
     prebuild
 <% } -%>
-    setup_ci if ENV["CI"]
     match(type: "<%= profile.matchType %>", readonly: ENV.fetch("MATCH_READONLY", "true") == "true") if ENV["MATCH_PASSWORD"]
     build_app(
       workspace: "ios/<%= profile.xcWorkspace %>.xcworkspace",

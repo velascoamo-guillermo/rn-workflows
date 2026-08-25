@@ -61,6 +61,23 @@ export const BuildProfileSchema = z.object({
 
 export type BuildProfile = z.infer<typeof BuildProfileSchema>;
 
+export const MatchConfigSchema = z.object({
+  /** Git repo storing the `fastlane match` certificates/profiles. */
+  gitUrl: z.string().min(1, 'match.gitUrl cannot be empty'),
+  /** Only "git" storage is supported today; matches match's own default. */
+  storageMode: z.literal('git').optional(),
+});
+
+export type MatchConfig = z.infer<typeof MatchConfigSchema>;
+
+export const IosProjectConfigSchema = z.object({
+  /** Apple Developer Team ID, e.g. "AB12CD34EF". App-wide, not per-profile. */
+  developmentTeam: z.string().min(1, 'developmentTeam cannot be empty').optional(),
+  match: MatchConfigSchema.optional(),
+});
+
+export type IosProjectConfig = z.infer<typeof IosProjectConfigSchema>;
+
 export const ProjectSchema = z.object({
   type: ProjectTypeSchema,
   bundleId: z.string().min(1),
@@ -72,6 +89,8 @@ export const ProjectSchema = z.object({
    * (Expo) or fall back to the last segment of `bundleId`.
    */
   scheme: z.string().min(1).optional(),
+  /** App-wide iOS signing config: development team id and `fastlane match` repo. */
+  ios: IosProjectConfigSchema.optional(),
 });
 
 export const ChecksSchema = z.object({

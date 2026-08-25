@@ -187,6 +187,11 @@ describe('expo prebuild runs outside the bundler env', () => {
     expect(content).toContain('expo prebuild --platform ios --clean');
   });
 
+  it('guards Bundler.with_unbundled_env so plain `fastlane` (no bundle exec) does not NameError', () => {
+    const content = fastfileFor('expo-pawlog.yml', { scheme: 'Pawlog' });
+    expect(content).toContain('if defined?(Bundler)');
+  });
+
   it('calls prebuild before build_app in expo ios lanes', () => {
     const content = fastfileFor('expo-pawlog.yml', { scheme: 'Pawlog' });
     const lanesIndex = content.indexOf('lane :production do');

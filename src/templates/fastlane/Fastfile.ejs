@@ -132,8 +132,13 @@ platform :ios do
     # bundle exec exports BUNDLE_GEMFILE; prebuild's `pod install` then resolves
     # `pod` through this bundle, which does not contain cocoapods. Strip the
     # bundler env so pod comes from the system Ruby instead.
-    Bundler.with_unbundled_env do
-      sh("cd .. && <%= packageManager === 'bun' ? 'bun expo prebuild' : packageManager === 'npm' ? 'npx expo prebuild' : 'yarn expo prebuild' %> --platform ios --clean")
+    prebuild_cmd = "cd .. && <%= packageManager === 'bun' ? 'bun expo prebuild' : packageManager === 'npm' ? 'npx expo prebuild' : 'yarn expo prebuild' %> --platform ios --clean"
+    if defined?(Bundler)
+      Bundler.with_unbundled_env do
+        sh(prebuild_cmd)
+      end
+    else
+      sh(prebuild_cmd)
     end
   end
 

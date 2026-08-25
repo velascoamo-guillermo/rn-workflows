@@ -123,6 +123,8 @@ Combine multiple targets with `+`, e.g. `testflight+firebase`.
 
 iOS jobs also require `MATCH_PASSWORD` and `MATCH_GIT_URL` for code signing via [fastlane match](https://docs.fastlane.tools/actions/match/).
 
+> The table above is a general reference. `generate` now also prints the exact secrets *your* config needs — with ready `gh secret set NAME` (or `glab variable set NAME` for `ci: gitlab`) one-liners — and writes a `SETUP.md` next to `fastlane/` with the same list plus what each secret is and where to get it. `SETUP.md` is skipped when a config needs zero secrets. `rn-workflows setup` can collect and upload most of them for you.
+
 ## Generated files
 
 Given `ci: github-actions`:
@@ -134,6 +136,8 @@ Given `ci: gitlab`:
 - `fastlane/Fastfile`, `fastlane/Appfile`, `fastlane/Pluginfile`, `Gemfile`
 - `fastlane/Matchfile` when `project.ios.match` is set
 - `.gitlab-ci.yml` with one stage per profile × platform
+
+Either way, `SETUP.md` is added next to `fastlane/` whenever the config requires at least one CI secret.
 
 ## Monorepos (matrix mode)
 

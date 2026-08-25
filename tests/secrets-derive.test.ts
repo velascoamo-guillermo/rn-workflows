@@ -1,0 +1,123 @@
+import { describe, expect, it } from 'bun:test';
+import { deriveRequiredSecrets, secretSetCommand } from '../src/utils/secrets.ts';
+import type { Config } from '../src/config/types.ts';
+
+function names(config: Config): string[] {
+  return deriveRequiredSecrets(config).map((s) => s.name);
+}
+
+describe('deriveRequiredSecrets', () => {
+  it('testflight-only (ios): App Store Connect key + match signing secrets', () => {
+    const config: Config = {
+      project: { type: 'bare', bundleId: 'com.test', packageName: 'com.test' },
+      ci: 'github-actions',
+      build: { production: { platform: 'ios', distribution: 'testflight' } },
+    };
+    expect(names(config).sort()).toEqual(
+      [
+        'APPLE_TEAM_ID',
+        'APP_STORE_CONNECT_API_KEY_PATH',
+        'MATCH_GIT_BASIC_AUTHORIZATION',
+        'MATCH_GIT_URL',
+        'MATCH_PASSWORD',
+      ].sort(),
+    );
+  });
+
+  it('firebase-only (android): firebase app distribution secrets', () => {
+    const config: Config = {
+      project: { type: 'bare', bundleId: 'com.test', packageName: 'com.test' },
+      ci: 'github-actions',
+      build: { staging: { platform: 'android', distribution: 'firebase' } },
+    };
+    expect(names(config).sort()).toEqual(
+      ['FIREBASE_APP_ID_ANDROID', 'FIREBASE_SERVICE_ACCOUNT_JSON'].sort(),
+    );
+  });
+
+  it('combined (all platforms, testflight+firebase): union of both platforms secrets', () => {
+    const config: Config = {
+      project: { type: 'bare', bundleId: 'com.test', packageName: 'com.test' },
+      ci: 'github-actions',
+      build: { staging: { platform: 'all', distribution: 'testflight+firebase' } },
+    };
+    expect(names(config).sort()).toEqual(
+      [
+        'APPLE_TEAM_ID',
+        'APP_STORE_CONNECT_API_KEY_PATH',
+        'FIREBASE_APP_ID_ANDROID',
+        'FIREBASE_APP_ID_IOS',
+        'FIREBASE_SERVICE_ACCOUNT_JSON',
+        'MATCH_GIT_BASIC_AUTHORIZATION',
+        'MATCH_GIT_URL',
+        'MATCH_PASSWORD',
+      ].sort(),
+    );
+  });
+
+  it('ota profile adds OTA_UPLOAD_KEY on top of distribution secrets', () => {
+    const config: Config = {
+      project: { type: 'bare', bundleId: 'com.test', packageName: 'com.test' },
+      ci: 'github-actions',
+      build: {
+        production: {
+          platform: 'android',
+          distribution: 'store',
+          ota: { server: 'https://ota.example.com', channel: 'production' },
+        },
+      },
+    };
+    expect(names(config).sort()).toEqual(['OTA_UPLOAD_KEY', 'PLAY_STORE_JSON_KEY'].sort());
+  });
+
+  it('android github-releases distribution requires GITHUB_TOKEN (rendered as a job secret)', () => {
+    const config: Config = {
+      project: { type: 'bare', bundleId: 'com.test', packageName: 'com.test' },
+      ci: 'github-actions',
+      build: { staging: { platform: 'android', distribution: 'github-releases' } },
+    };
+    expect(names(config)).toEqual(['GITHUB_TOKEN']);
+  });
+
+  it('a target with no rendered secrets requires zero (out-of-schema android+testflight, since the CLI rejects that combo)', () => {
+    const config: Config = {
+      project: { type: 'bare', bundleId: 'com.test', packageName: 'com.test' },
+      ci: 'github-actions',
+      build: { staging: { platform: 'android', distribution: 'testflight' } },
+    };
+    expect(deriveRequiredSecrets(config)).toEqual([]);
+  });
+
+  it('dedupes secrets shared across profiles', () => {
+    const config: Config = {
+      project: { type: 'bare', bundleId: 'com.test', packageName: 'com.test' },
+      ci: 'github-actions',
+      build: {
+        staging: { platform: 'android', distribution: 'firebase' },
+        production: { platform: 'android', distribution: 'firebase' },
+      },
+    };
+    expect(names(config).filter((n) => n === 'FIREBASE_SERVICE_ACCOUNT_JSON')).toHaveLength(1);
+  });
+
+  it('every requirement carries a human description', () => {
+    const config: Config = {
+      project: { type: 'bare', bundleId: 'com.test', packageName: 'com.test' },
+      ci: 'github-actions',
+      build: { staging: { platform: 'android', distribution: 'firebase' } },
+    };
+    for (const req of deriveRequiredSecrets(config)) {
+      expect(req.description.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('secretSetCommand', () => {
+  it('uses gh for github-actions', () => {
+    expect(secretSetCommand('github-actions', 'FOO')).toBe('gh secret set FOO');
+  });
+
+  it('uses glab for gitlab', () => {
+    expect(secretSetCommand('gitlab', 'FOO')).toBe('glab variable set FOO');
+  });
+});

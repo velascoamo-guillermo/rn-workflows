@@ -6,11 +6,12 @@ import initCommand from './init.ts';
 import generateCommand from './generate.ts';
 import { makeFirebaseAppsStep, makeServiceAccountStep } from '../setup/firebase.ts';
 import { makeMatchRepoStep } from '../setup/match.ts';
+import { makeAppStoreStep } from '../setup/appstore.ts';
 import { makeSecretsStep } from '../setup/secrets.ts';
 import { runSteps } from '../setup/runner.ts';
 import { loadConfig, ConfigError } from '../config/parser.ts';
 import { promptText } from '../setup/prompts.ts';
-import type { SetupContext } from '../setup/types.ts';
+import type { SetupContext, Step } from '../setup/types.ts';
 
 export const MENU_CHOICES = [
   { value: 'init', label: 'Init project', hint: 'Create rn-workflows.yml' },
@@ -34,6 +35,30 @@ export const SETUP_CHOICES = [
   { value: 'all', label: 'All', hint: 'Run all setup steps' },
   { value: 'back', label: 'Back' },
 ] as const;
+
+export type SetupStepChoice = 'firebase' | 'match' | 'secrets' | 'all';
+
+/**
+ * Steps to run for a given Setup submenu choice. `all` must include every
+ * step that `makeSecretsStep` (src/setup/secrets.ts) can require values
+ * for, or it throws on whatever wasn't collected first — e.g. the ASC_*
+ * vars from `makeAppStoreStep` (#34).
+ */
+export function buildSetupSteps(choice: SetupStepChoice): Step[] {
+  const stepsMap: Record<SetupStepChoice, Step[]> = {
+    firebase: [makeFirebaseAppsStep(), makeServiceAccountStep()],
+    match: [makeMatchRepoStep()],
+    secrets: [makeSecretsStep()],
+    all: [
+      makeFirebaseAppsStep(),
+      makeServiceAccountStep(),
+      makeMatchRepoStep(),
+      makeAppStoreStep(),
+      makeSecretsStep(),
+    ],
+  };
+  return stepsMap[choice];
+}
 
 export async function runMenu(cwd: string = process.cwd()): Promise<void> {
   p.intro('rn-workflows');
@@ -122,14 +147,7 @@ async function handleSetupMenu(cwd: string): Promise<void> {
     ctx.githubRepo = raw.replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
   }
 
-  const stepsMap = {
-    firebase: [makeFirebaseAppsStep(), makeServiceAccountStep()],
-    match: [makeMatchRepoStep()],
-    secrets: [makeSecretsStep()],
-    all: [makeFirebaseAppsStep(), makeServiceAccountStep(), makeMatchRepoStep(), makeSecretsStep()],
-  };
-
-  const selectedSteps = stepsMap[choice as keyof typeof stepsMap];
+  const selectedSteps = buildSetupSteps(choice as SetupStepChoice);
   if (!selectedSteps) return;
 
   try {

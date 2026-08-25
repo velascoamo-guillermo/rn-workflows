@@ -22,6 +22,7 @@ import {
   toPosixRelative,
 } from '../utils/monorepo.ts';
 import { detectExpoScheme } from '../utils/expo.ts';
+import { buildSetupMarkdown, deriveRequiredSecrets, secretSetCommand } from '../utils/secrets.ts';
 
 function detectPackageManagerAt(dir: string): 'yarn' | 'npm' | 'bun' | null {
   if (existsSync(resolve(dir, 'bun.lock')) || existsSync(resolve(dir, 'bun.lockb'))) return 'bun';
@@ -41,9 +42,11 @@ function detectPackageManager(...dirs: string[]): 'yarn' | 'npm' | 'bun' {
 interface WriteOptions {
   outDir: string;
   dryRun: boolean;
+  /** When set, prints the derived required-secrets summary before the outro. */
+  secretsSummary?: { secrets: ReturnType<typeof deriveRequiredSecrets>; ci: CiProvider };
 }
 
-function writeFiles(files: GeneratedFile[], { outDir, dryRun }: WriteOptions): void {
+function writeFiles(files: GeneratedFile[], { outDir, dryRun, secretsSummary }: WriteOptions): void {
   p.log.info(`${dryRun ? '[dry-run] ' : ''}Generating ${files.length} file(s) in ${outDir}`);
   for (const file of files) {
     const abs = resolve(outDir, file.path);
@@ -53,6 +56,14 @@ function writeFiles(files: GeneratedFile[], { outDir, dryRun }: WriteOptions): v
       writeFileEnsured(abs, file.content);
       p.log.step(`wrote ${file.path}`);
     }
+  }
+  if (secretsSummary && secretsSummary.secrets.length > 0) {
+    const { secrets, ci } = secretsSummary;
+    p.log.info(`Required CI secrets (${secrets.length}) — see SETUP.md for details:`);
+    for (const req of secrets) {
+      p.log.step(`${secretSetCommand(ci, req.name)} "<value>"`);
+    }
+    p.log.info('Run `rn-workflows setup` to collect and upload these automatically.');
   }
   p.outro(dryRun ? 'Dry run complete.' : 'Done.');
 }
@@ -246,13 +257,22 @@ export default defineCommand({
       ...(gitRoot ? { workflowsPathFromRoot: toPosixRelative(gitRoot, workflowsDir) } : {}),
     };
 
+    const requiredSecrets = deriveRequiredSecrets(config);
+
     const files: GeneratedFile[] = [
       ...generateFastlane(config, { packageManager, scheme: detectedScheme }),
       ...(config.ci === 'github-actions'
         ? generateGithubActions(config, githubOptions)
         : generateGitlab(config)),
+      ...(requiredSecrets.length > 0
+        ? [{ path: 'SETUP.md', content: buildSetupMarkdown(requiredSecrets, config.ci) }]
+        : []),
     ];
 
-    writeFiles(files, { outDir: String(args.cwd), dryRun: Boolean(args['dry-run']) });
+    writeFiles(files, {
+      outDir: String(args.cwd),
+      dryRun: Boolean(args['dry-run']),
+      secretsSummary: { secrets: requiredSecrets, ci: config.ci },
+    });
   },
 });

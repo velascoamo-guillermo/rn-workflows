@@ -4,7 +4,18 @@ import { platformsFor, secretsFor } from '../secrets.ts';
 export interface SecretRequirement {
   name: string;
   description: string;
+  /**
+   * True for secrets that CI can build without — e.g. a boolean flag with a
+   * false-y default. Still rendered in the provider env blocks (an empty
+   * env var is harmless there) but excluded from every "required secrets"
+   * checklist: the terminal summary in `generate`, SETUP.md's required
+   * section, and `setup`'s missing-secrets checklist.
+   */
+  optional?: boolean;
 }
+
+/** Secret names that are collectible/renderable but never "required". */
+const OPTIONAL_SECRETS = new Set<string>(['ASC_KEY_IS_BASE64']);
 
 /**
  * Descriptions for every secret name `secretsFor` (src/secrets.ts, the same
@@ -51,7 +62,7 @@ const SECRET_DESCRIPTIONS: Record<string, string> = {
 function requirement(name: string): SecretRequirement {
   const description = SECRET_DESCRIPTIONS[name];
   if (!description) throw new Error(`No description registered for secret "${name}" — add one to SECRET_DESCRIPTIONS.`);
-  return { name, description };
+  return OPTIONAL_SECRETS.has(name) ? { name, description, optional: true } : { name, description };
 }
 
 /**
@@ -96,6 +107,11 @@ export function secretSetCommand(ci: CiProvider, name: string): string {
   return ci === 'gitlab' ? `glab variable set ${name}` : `gh secret set ${name}`;
 }
 
+/** Non-optional secrets — the set every "required secrets" checklist should use. */
+export function requiredOnly(secrets: SecretRequirement[]): SecretRequirement[] {
+  return secrets.filter((s) => !s.optional);
+}
+
 export function buildSetupMarkdown(secrets: SecretRequirement[], ci: CiProvider): string {
   const lines: string[] = [
     '# CI secrets setup',
@@ -109,7 +125,7 @@ export function buildSetupMarkdown(secrets: SecretRequirement[], ci: CiProvider)
   ];
 
   for (const req of secrets) {
-    lines.push(`## ${req.name}`, '', req.description, '', '```sh', `${secretSetCommand(ci, req.name)} "<value>"`, '```', '');
+    lines.push(`## ${req.name}${req.optional ? ' (optional)' : ''}`, '', req.description, '', '```sh', `${secretSetCommand(ci, req.name)} "<value>"`, '```', '');
   }
 
   return lines.join('\n');

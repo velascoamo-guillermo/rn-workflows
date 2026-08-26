@@ -22,7 +22,7 @@ import {
   toPosixRelative,
 } from '../utils/monorepo.ts';
 import { detectExpoScheme } from '../utils/expo.ts';
-import { buildSetupMarkdown, deriveRequiredSecrets, secretSetCommand } from '../utils/secrets.ts';
+import { buildSetupMarkdown, deriveRequiredSecrets, requiredOnly, secretSetCommand } from '../utils/secrets.ts';
 
 function detectPackageManagerAt(dir: string): 'yarn' | 'npm' | 'bun' | null {
   if (existsSync(resolve(dir, 'bun.lock')) || existsSync(resolve(dir, 'bun.lockb'))) return 'bun';
@@ -59,11 +59,14 @@ function writeFiles(files: GeneratedFile[], { outDir, dryRun, secretsSummary }: 
   }
   if (secretsSummary && secretsSummary.secrets.length > 0) {
     const { secrets, ci } = secretsSummary;
-    p.log.info(`Required CI secrets (${secrets.length}) — see SETUP.md for details:`);
-    for (const req of secrets) {
-      p.log.step(`${secretSetCommand(ci, req.name)} "<value>"`);
+    const required = requiredOnly(secrets);
+    if (required.length > 0) {
+      p.log.info(`Required CI secrets (${required.length}) — see SETUP.md for details:`);
+      for (const req of required) {
+        p.log.step(`${secretSetCommand(ci, req.name)} "<value>"`);
+      }
+      p.log.info('See SETUP.md for details. `rn-workflows setup` can collect and upload some of these for you.');
     }
-    p.log.info('See SETUP.md for details. `rn-workflows setup` can collect and upload some of these for you.');
   }
   p.outro(dryRun ? 'Dry run complete.' : 'Done.');
 }

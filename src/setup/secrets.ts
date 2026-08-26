@@ -1,6 +1,6 @@
 import * as p from '@clack/prompts';
 import type { Config } from '../config/types.ts';
-import { deriveRequiredSecrets, secretSetCommand } from '../utils/secrets.ts';
+import { deriveRequiredSecrets, requiredOnly, secretSetCommand } from '../utils/secrets.ts';
 import type { SetupContext, StepResult } from './types.ts';
 import { shell, isAvailable } from './shell.ts';
 
@@ -12,7 +12,7 @@ import { shell, isAvailable } from './shell.ts';
  * tests/setup-secrets.test.ts for the cross-check pinning the two together.
  */
 export function collectRequiredSecrets(config: Config): string[] {
-  return deriveRequiredSecrets(config).map((s) => s.name);
+  return requiredOnly(deriveRequiredSecrets(config)).map((s) => s.name);
 }
 
 export function makeSecretsStep() {

@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { parseConfig } from '../src/config/parser.ts';
 import { generateFastlane } from '../src/generators/fastlane.ts';
+
+function rubyAvailable(): boolean {
+  try {
+    execFileSync('ruby', ['-v'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dir, 'fixtures', name), 'utf8');
@@ -323,5 +335,107 @@ describe('developmentTeam signing', () => {
     const cfg = parseConfig(fixture('production-all.yml'));
     const appfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Appfile')!;
     expect(appfile.content).toContain('team_id(ENV["APPLE_TEAM_ID"]) if ENV["APPLE_TEAM_ID"]');
+  });
+});
+
+describe('EJS escaping of hostile-but-legal config values (#35)', () => {
+  it('renders gitUrl with & and embedded quotes raw, not HTML-escaped, in Matchfile', () => {
+    const cfg = parseConfig(fixture('ios-signing-hostile.yml'));
+    const matchfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Matchfile')!;
+    expect(matchfile.content).toContain(
+      'git_url("https://user:pa\\"ss@github.com/org/repo.git?a=1&b=2")',
+    );
+    expect(matchfile.content).not.toContain('&amp;');
+    expect(matchfile.content).not.toContain('&#34;');
+    expect(matchfile.content).not.toContain('&quot;');
+  });
+
+  it('escapes an embedded quote in packageName instead of HTML-entity-encoding it', () => {
+    const cfg = parseConfig(fixture('ios-signing-hostile.yml'));
+    const appfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Appfile')!;
+    expect(appfile.content).toContain('package_name("com.gvelasco.\\"pawlog\\"")');
+    expect(appfile.content).not.toContain('&#34;');
+  });
+
+  it('escapes an embedded quote in project.scheme within the Fastfile workspace/scheme strings', () => {
+    const cfg = parseConfig(fixture('ios-signing-hostile.yml'));
+    const fastfile = generateFastlane(cfg).find((f) => f.path === 'fastlane/Fastfile')!;
+    expect(fastfile.content).toContain('workspace: "ios/My \\"Special\\" Scheme.xcworkspace",');
+    expect(fastfile.content).toContain('scheme: "My \\"Special\\" Scheme",');
+    expect(fastfile.content).not.toContain('&#34;');
+  });
+
+  it('uses a quoted Ruby symbol (not a broken bare lane) for a hostile build profile name', () => {
+    const cfg = parseConfig(fixture('production-all.yml'));
+    // Bypass schema validation deliberately: the template's own escaping is
+    // a second line of defense independent of the schema-level charset
+    // whitelist covering this same field.
+    const hostileCfg = {
+      ...cfg,
+      build: { 'my "cool" profile': cfg.build.production! },
+    };
+    const fastfile = generateFastlane(hostileCfg).find((f) => f.path === 'fastlane/Fastfile')!;
+    expect(fastfile.content).toContain('lane :"my \\"cool\\" profile" do');
+    expect(fastfile.content).not.toContain('&#34;');
+  });
+});
+
+describe('Ruby interpolation neutralization (#40 critical)', () => {
+  // Bypass schema validation deliberately: this exercises the template's own
+  // escaping (rubyString), a second line of defense independent of whatever
+  // the schema does or doesn't restrict for these free-text fields.
+  it('neutralizes #{...} in gitUrl so it cannot leak env vars via Ruby interpolation', () => {
+    const cfg = parseConfig(fixture('ios-signing-hostile.yml'));
+    const hostileCfg = {
+      ...cfg,
+      project: {
+        ...cfg.project,
+        ios: {
+          ...cfg.project.ios,
+          match: {
+            ...cfg.project.ios!.match!,
+            gitUrl: 'https://github.com/org/repo.git#{ENV["SECRET"]}',
+          },
+        },
+      },
+    };
+    const matchfile = generateFastlane(hostileCfg).find((f) => f.path === 'fastlane/Matchfile')!;
+    expect(matchfile.content).not.toContain('#{ENV["SECRET"]}');
+    expect(matchfile.content).toContain('\\#{ENV[\\"SECRET\\"]}');
+  });
+
+  it('neutralizes #{...} in packageName and scheme', () => {
+    const cfg = parseConfig(fixture('ios-signing-hostile.yml'));
+    const hostileCfg = {
+      ...cfg,
+      project: { ...cfg.project, packageName: 'com.app#{ENV["SECRET"]}' },
+    };
+    const appfile = generateFastlane(hostileCfg).find((f) => f.path === 'fastlane/Appfile')!;
+    expect(appfile.content).not.toContain('#{ENV["SECRET"]}');
+  });
+
+  it('produces a syntactically valid Fastfile (ruby -c) even with #{}-bearing config values', () => {
+    if (!rubyAvailable()) {
+      console.warn('ruby not on PATH — skipping ruby -c syntax check');
+      return;
+    }
+    const cfg = parseConfig(fixture('ios-signing-hostile.yml'));
+    const hostileCfg = {
+      ...cfg,
+      project: {
+        ...cfg.project,
+        packageName: 'com.app#{ENV["SECRET"]}',
+        scheme: 'My #{ENV["SECRET"]} Scheme',
+      },
+    };
+    const fastfile = generateFastlane(hostileCfg).find((f) => f.path === 'fastlane/Fastfile')!;
+    const dir = mkdtempSync(join(tmpdir(), 'rn-workflows-rubyc-'));
+    const filePath = join(dir, 'Fastfile');
+    try {
+      writeFileSync(filePath, fastfile.content);
+      expect(() => execFileSync('ruby', ['-c', filePath], { stdio: 'pipe' })).not.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

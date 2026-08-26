@@ -40,6 +40,8 @@ var DISTRIBUTIONS = [
 ];
 var CI_PROVIDERS = ["github-actions", "gitlab"];
 var PROJECT_TYPES = ["expo", "bare"];
+var SINGLE_LINE_PATTERN = /^[^\r\n]*$/;
+var SINGLE_LINE_MESSAGE = "must not contain newlines";
 var PlatformSchema = z.enum(PLATFORMS);
 var DistributionSchema = z.enum(DISTRIBUTIONS);
 var CiSchema = z.enum(CI_PROVIDERS);
@@ -60,9 +62,11 @@ var AndroidBuildOptionsSchema = z.object({
 var IosBuildOptionsSchema = z.object({
   exportMethod: z.enum(["app-store", "ad-hoc", "development"]).optional()
 });
+var OTA_SERVER_SAFE = /^https?:\/\/[A-Za-z0-9._~:/?#@%&=+-]+$/;
+var OTA_CHANNEL_SAFE = /^[A-Za-z0-9_.-]+$/;
 var OtaConfigSchema = z.object({
-  server: z.string().min(1),
-  channel: z.string().min(1)
+  server: z.string().min(1).regex(OTA_SERVER_SAFE, "ota.server must not contain whitespace or shell metacharacters"),
+  channel: z.string().min(1).regex(OTA_CHANNEL_SAFE, "ota.channel may only contain letters, digits, dot, hyphen, underscore")
 });
 var BuildProfileSchema = z.object({
   platform: PlatformSchema,
@@ -72,18 +76,20 @@ var BuildProfileSchema = z.object({
   ota: OtaConfigSchema.optional()
 });
 var MatchConfigSchema = z.object({
-  gitUrl: z.string().min(1, "match.gitUrl cannot be empty"),
+  gitUrl: z.string().min(1, "match.gitUrl cannot be empty").regex(SINGLE_LINE_PATTERN, `match.gitUrl ${SINGLE_LINE_MESSAGE}`),
   storageMode: z.literal("git").optional()
 });
+var TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/;
 var IosProjectConfigSchema = z.object({
-  developmentTeam: z.string().min(1, "developmentTeam cannot be empty").optional(),
+  developmentTeam: z.string().min(1, "developmentTeam cannot be empty").regex(TEAM_ID_PATTERN, "developmentTeam must be a 10-character Apple Team ID (A-Z, 0-9)").optional(),
   match: MatchConfigSchema.optional()
 });
+var BUNDLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 var ProjectSchema = z.object({
   type: ProjectTypeSchema,
-  bundleId: z.string().min(1),
-  packageName: z.string().min(1),
-  scheme: z.string().min(1).optional(),
+  bundleId: z.string().min(1).regex(BUNDLE_ID_PATTERN, "bundleId may only contain letters, digits, dot, hyphen, underscore (unsafe otherwise for shell/xcargs interpolation)"),
+  packageName: z.string().min(1).regex(SINGLE_LINE_PATTERN, `packageName ${SINGLE_LINE_MESSAGE}`),
+  scheme: z.string().min(1).regex(SINGLE_LINE_PATTERN, `scheme ${SINGLE_LINE_MESSAGE}`).optional(),
   ios: IosProjectConfigSchema.optional()
 });
 var ChecksSchema = z.object({
@@ -93,9 +99,10 @@ var ChecksSchema = z.object({
 });
 var CiObjectSchema = z.object({
   provider: CiSchema,
-  workflowsDir: z.string().min(1, "workflowsDir cannot be empty").optional(),
-  extraPaths: z.array(z.string().min(1, "extraPaths entries cannot be empty")).optional()
+  workflowsDir: z.string().min(1, "workflowsDir cannot be empty").regex(SINGLE_LINE_PATTERN, `workflowsDir ${SINGLE_LINE_MESSAGE}`).optional(),
+  extraPaths: z.array(z.string().min(1, "extraPaths entries cannot be empty").regex(SINGLE_LINE_PATTERN, `extraPaths entries ${SINGLE_LINE_MESSAGE}`)).optional()
 });
+var BUILD_PROFILE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*$/;
 var ConfigSchema = z.object({
   project: ProjectSchema,
   ci: z.union([CiSchema, CiObjectSchema]),
@@ -111,6 +118,13 @@ var ConfigSchema = z.object({
     });
   }
   for (const [name, profile] of profiles) {
+    if (!BUILD_PROFILE_NAME_PATTERN.test(name)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["build", name],
+        message: `build profile name "${name}" may only contain letters, digits, hyphen, underscore, and must start with a letter (unsafe otherwise as a Fastlane lane name / shell argument)`
+      });
+    }
     const targets = profile.distribution.split("+").map((s) => s.trim());
     const touchesIos = profile.platform === "ios" || profile.platform === "all";
     const touchesAndroid = profile.platform === "android" || profile.platform === "all";
@@ -381,9 +395,49 @@ function resolveTemplate(relPath) {
   }
   throw new Error(`Template not found: ${relPath}`);
 }
+function rubyString(value) {
+  return value.replace(/\\/g, "\\\\").replace(/#([{@$])/g, "\\#$1").replace(/"/g, "\\\"");
+}
+var RUBY_BARE_SYMBOL = /^[A-Za-z_][A-Za-z0-9_]*[?!=]?$/;
+function rubySymbol(value) {
+  if (RUBY_BARE_SYMBOL.test(value))
+    return `:${value}`;
+  return `:"${rubyString(value)}"`;
+}
+var YAML_UNSAFE_CHARS = /[:#[\]{}&*!|>'"%@`,\n\r\t]/;
+var YAML_UNSAFE_LEADING = /^[\s\-?:,[\]{}#&*!|>'"%@`]/;
+var YAML_RESERVED = /^(true|false|null|yes|no|on|off|~)$/i;
+var YAML_NUMBER_LIKE = /^[-+]?(0x[0-9a-fA-F][0-9a-fA-F_]*|0o[0-7][0-7_]*|\d[\d_]*(\.\d[\d_]*)?([eE][-+]?\d+)?|\.\d[\d_]*([eE][-+]?\d+)?)$/;
+var YAML_DATE_LIKE = /^\d{4}-\d{1,2}-\d{1,2}([Tt ]\d{1,2}:\d{2}:\d{2}(\.\d+)?(\s*(Z|z|[-+]\d{1,2}(:\d{2})?))?)?$/;
+function needsYamlQuoting(value) {
+  if (value === "")
+    return true;
+  if (/^\s/.test(value) || /\s$/.test(value))
+    return true;
+  if (YAML_UNSAFE_LEADING.test(value))
+    return true;
+  if (YAML_UNSAFE_CHARS.test(value))
+    return true;
+  if (YAML_RESERVED.test(value))
+    return true;
+  if (YAML_NUMBER_LIKE.test(value))
+    return true;
+  if (YAML_DATE_LIKE.test(value))
+    return true;
+  return false;
+}
+function yamlScalar(value) {
+  if (!needsYamlQuoting(value))
+    return value;
+  return `'${value.replace(/'/g, "''")}'`;
+}
+function yamlSingleQuoted(value) {
+  return value.replace(/'/g, "''");
+}
 function renderTemplate(relPath, data) {
   const tpl = resolveTemplate(relPath);
-  return ejs.render(tpl, data, { rmWhitespace: false });
+  const helpers = { rubyString, rubySymbol, yamlScalar, yamlSingleQuoted };
+  return ejs.render(tpl, { ...helpers, ...data }, { rmWhitespace: false });
 }
 
 // src/generators/fastlane.ts

@@ -1,0 +1,18 @@
+project:
+  type: bare
+  bundleId: com.gvelasco.pawlog
+  packageName: 'com.gvelasco."pawlog"'
+  scheme: 'My "Special" Scheme'
+  ios:
+    developmentTeam: AB12CD34EF
+    match:
+      gitUrl: 'https://user:pa"ss@github.com/org/repo.git?a=1&b=2'
+
+ci: github-actions
+
+build:
+  production:
+    platform: ios
+    distribution: store
+    ios:
+      exportMethod: app-store

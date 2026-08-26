@@ -182,6 +182,13 @@ bun run build   # compile to dist/
 
 Tests live in `tests/`. Snapshots in `tests/__snapshots__/` are committed — update with `bun test --update-snapshots` after intentional template changes.
 
+### Development
+
+`dist/index.js` is committed to the repo (consumers reference it directly, e.g.
+`node ../../rn-workflows/dist/index.js`). Run `bun run build` before pushing any
+`src/` change — CI fails the quality job if the committed `dist/` doesn't match
+a fresh build (`Check dist is up to date` step).
+
 ## License
 
 MIT

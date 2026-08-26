@@ -22,6 +22,24 @@ describe('rubyString', () => {
   it('never produces HTML entities for &, <, > (raw output, not HTML-escaped)', () => {
     expect(rubyString('a&b<c>d')).toBe('a&b<c>d');
   });
+
+  it('neutralizes #{...} so it cannot execute as Ruby interpolation (#40 critical)', () => {
+    const out = rubyString('https://example.com/repo.git#{ENV["SECRET"]}');
+    // The escaped form must still be a syntactically valid Ruby double-quoted
+    // string body once re-wrapped in "...": a backslash-escaped #{.
+    expect(out).toBe('https://example.com/repo.git\\#{ENV[\\"SECRET\\"]}');
+  });
+
+  it('neutralizes #@ and #$ (the other Ruby interpolation triggers)', () => {
+    expect(rubyString('a#@ivar')).toBe('a\\#@ivar');
+    expect(rubyString('a#$global')).toBe('a\\#$global');
+  });
+
+  it('leaves a bare # untouched when not followed by {, @, or $', () => {
+    expect(rubyString('https://example.com/repo.git#readme')).toBe(
+      'https://example.com/repo.git#readme',
+    );
+  });
 });
 
 describe('rubySymbol', () => {

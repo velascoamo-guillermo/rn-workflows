@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { parseConfig } from '../src/config/parser.ts';
 import { generateFastlane } from '../src/generators/fastlane.ts';
+
+function rubyAvailable(): boolean {
+  try {
+    execFileSync('ruby', ['-v'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dir, 'fixtures', name), 'utf8');
@@ -365,5 +377,65 @@ describe('EJS escaping of hostile-but-legal config values (#35)', () => {
     const fastfile = generateFastlane(hostileCfg).find((f) => f.path === 'fastlane/Fastfile')!;
     expect(fastfile.content).toContain('lane :"my \\"cool\\" profile" do');
     expect(fastfile.content).not.toContain('&#34;');
+  });
+});
+
+describe('Ruby interpolation neutralization (#40 critical)', () => {
+  // Bypass schema validation deliberately: this exercises the template's own
+  // escaping (rubyString), a second line of defense independent of whatever
+  // the schema does or doesn't restrict for these free-text fields.
+  it('neutralizes #{...} in gitUrl so it cannot leak env vars via Ruby interpolation', () => {
+    const cfg = parseConfig(fixture('ios-signing-hostile.yml'));
+    const hostileCfg = {
+      ...cfg,
+      project: {
+        ...cfg.project,
+        ios: {
+          ...cfg.project.ios,
+          match: {
+            ...cfg.project.ios!.match!,
+            gitUrl: 'https://github.com/org/repo.git#{ENV["SECRET"]}',
+          },
+        },
+      },
+    };
+    const matchfile = generateFastlane(hostileCfg).find((f) => f.path === 'fastlane/Matchfile')!;
+    expect(matchfile.content).not.toContain('#{ENV["SECRET"]}');
+    expect(matchfile.content).toContain('\\#{ENV[\\"SECRET\\"]}');
+  });
+
+  it('neutralizes #{...} in packageName and scheme', () => {
+    const cfg = parseConfig(fixture('ios-signing-hostile.yml'));
+    const hostileCfg = {
+      ...cfg,
+      project: { ...cfg.project, packageName: 'com.app#{ENV["SECRET"]}' },
+    };
+    const appfile = generateFastlane(hostileCfg).find((f) => f.path === 'fastlane/Appfile')!;
+    expect(appfile.content).not.toContain('#{ENV["SECRET"]}');
+  });
+
+  it('produces a syntactically valid Fastfile (ruby -c) even with #{}-bearing config values', () => {
+    if (!rubyAvailable()) {
+      console.warn('ruby not on PATH — skipping ruby -c syntax check');
+      return;
+    }
+    const cfg = parseConfig(fixture('ios-signing-hostile.yml'));
+    const hostileCfg = {
+      ...cfg,
+      project: {
+        ...cfg.project,
+        packageName: 'com.app#{ENV["SECRET"]}',
+        scheme: 'My #{ENV["SECRET"]} Scheme',
+      },
+    };
+    const fastfile = generateFastlane(hostileCfg).find((f) => f.path === 'fastlane/Fastfile')!;
+    const dir = mkdtempSync(join(tmpdir(), 'rn-workflows-rubyc-'));
+    const filePath = join(dir, 'Fastfile');
+    try {
+      writeFileSync(filePath, fastfile.content);
+      expect(() => execFileSync('ruby', ['-c', filePath], { stdio: 'pipe' })).not.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

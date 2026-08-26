@@ -25,15 +25,23 @@ function resolveTemplate(relPath: string): string {
 /**
  * Escapes a value for embedding inside a Ruby double-quoted string literal
  * that the template already wraps in literal `"..."`. Order matters:
- * backslashes must be doubled before quotes are escaped, or an escaped quote
- * would itself get re-escaped.
+ * - backslashes must be doubled first, or a backslash introduced by a later
+ *   step (interpolation-guard, quote-escaping) would itself get re-escaped.
+ * - `#{`, `#@`, `#$` (Ruby's double-quoted-string interpolation triggers)
+ *   are then neutralized by backslash-escaping the `#`, so untrusted values
+ *   like a `gitUrl` containing `#{ENV["SECRET"]}` are rendered as inert text
+ *   instead of executing inside fastlane's Ruby runtime.
+ * - quotes are escaped last.
  *
  * Use with raw output (`<%- rubyString(x) %>`), never `<%= %>` — HTML-escaping
  * turns `&`/`'` into entities (`&amp;`, `&#39;`) which corrupts the Ruby
  * string instead of protecting it.
  */
 export function rubyString(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/#([{@$])/g, '\\#$1')
+    .replace(/"/g, '\\"');
 }
 
 const RUBY_BARE_SYMBOL = /^[A-Za-z_][A-Za-z0-9_]*[?!=]?$/;

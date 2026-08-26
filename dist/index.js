@@ -1,5 +1,21 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
+var __create = Object.create;
+var __getProtoOf = Object.getPrototypeOf;
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __toESM = (mod, isNodeMode, target) => {
+  target = mod != null ? __create(__getProtoOf(mod)) : {};
+  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  for (let key of __getOwnPropNames(mod))
+    if (!__hasOwnProp.call(to, key))
+      __defProp(to, key, {
+        get: () => mod[key],
+        enumerable: true
+      });
+  return to;
+};
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // src/index.ts
@@ -193,6 +209,7 @@ function readName(parsed) {
 }
 
 // src/commands/init.ts
+var BUILD_PROFILE_NAMES = ["preview", "staging", "production"];
 var init_default = defineCommand({
   meta: {
     name: "init",
@@ -208,6 +225,39 @@ var init_default = defineCommand({
       type: "string",
       description: "Directory to create rn-workflows.yml in",
       default: process.cwd()
+    },
+    yes: {
+      type: "boolean",
+      description: "Non-interactive: skip all prompts, using flag values (or the same sane defaults the prompts use).",
+      default: false
+    },
+    "project-type": {
+      type: "string",
+      description: `[--yes] Project type. Valid: ${PROJECT_TYPES.join(", ")}. Default: expo`
+    },
+    "bundle-id": {
+      type: "string",
+      description: "[--yes] iOS bundle identifier, e.g. com.myapp. Default: com.example.app"
+    },
+    "package-name": {
+      type: "string",
+      description: "[--yes] Android package name. Default: same as --bundle-id"
+    },
+    scheme: {
+      type: "string",
+      description: "[--yes] Xcode scheme (ios/<scheme>.xcworkspace). Default: auto-detected from app.json (Expo) or the bundle id tail"
+    },
+    ci: {
+      type: "string",
+      description: `[--yes] CI provider. Valid: ${CI_PROVIDERS.join(", ")}. Default: github-actions`
+    },
+    profiles: {
+      type: "string",
+      description: `[--yes] Comma-separated build profiles. Valid: ${BUILD_PROFILE_NAMES.join(", ")}. Default: preview,production`
+    },
+    distribution: {
+      type: "string",
+      description: `[--yes] Distribution(s) for preview/staging profiles, "+"-combinable. Valid: ${DISTRIBUTIONS.filter((d) => d !== "store").join(", ")}. Default: firebase`
     }
   },
   async run({ args }) {
@@ -217,55 +267,96 @@ var init_default = defineCommand({
       p.log.error(`${outPath} already exists. Pass --force to overwrite.`);
       process.exit(1);
     }
-    const projectType = await p.select({
-      message: "Project type",
-      options: PROJECT_TYPES.map((t) => ({ value: t, label: t })),
-      initialValue: "expo"
-    });
-    assertNotCancelled(projectType);
-    const bundleId = await p.text({
-      message: "iOS bundle identifier (e.g. com.myapp)",
-      placeholder: "com.myapp",
-      validate: (v) => v && v.includes(".") ? undefined : "Must look like com.myapp"
-    });
-    assertNotCancelled(bundleId);
-    const packageName = await p.text({
-      message: "Android package name",
-      placeholder: bundleId,
-      defaultValue: bundleId
-    });
-    assertNotCancelled(packageName);
-    const defaultScheme = (projectType === "expo" ? detectExpoScheme(String(args.cwd)) : undefined) ?? bundleId.split(".").pop() ?? "App";
-    const scheme = await p.text({
-      message: "Xcode scheme (ios/<scheme>.xcworkspace)",
-      placeholder: defaultScheme,
-      defaultValue: defaultScheme
-    });
-    assertNotCancelled(scheme);
-    const ci = await p.select({
-      message: "CI provider",
-      options: CI_PROVIDERS.map((c) => ({ value: c, label: c })),
-      initialValue: "github-actions"
-    });
-    assertNotCancelled(ci);
-    const profiles = await p.multiselect({
-      message: "Build profiles to generate",
-      options: [
-        { value: "preview", label: "preview (android-only, firebase)" },
-        { value: "staging", label: "staging (android+ios, ad-hoc)" },
-        { value: "production", label: "production (android+ios, store)" }
-      ],
-      initialValues: ["preview", "production"],
-      required: true
-    });
-    assertNotCancelled(profiles);
-    const distributions = await p.multiselect({
-      message: "Distributions to support (affects preview/staging only)",
-      options: DISTRIBUTIONS.filter((d) => d !== "store").map((d) => ({ value: d, label: d })),
-      initialValues: ["firebase"],
-      required: true
-    });
-    assertNotCancelled(distributions);
+    let projectType;
+    let bundleId;
+    let packageName;
+    let scheme;
+    let ci;
+    let profiles;
+    let distributions;
+    if (args.yes) {
+      projectType = String(args["project-type"] ?? "expo");
+      if (!PROJECT_TYPES.includes(projectType)) {
+        p.log.error(`Invalid --project-type "${projectType}". Valid: ${PROJECT_TYPES.join(", ")}`);
+        process.exit(1);
+      }
+      bundleId = String(args["bundle-id"] ?? "com.example.app");
+      if (!bundleId.includes(".")) {
+        p.log.error(`Invalid --bundle-id "${bundleId}" — must look like com.myapp.`);
+        process.exit(1);
+      }
+      packageName = String(args["package-name"] ?? bundleId);
+      const defaultScheme = (projectType === "expo" ? detectExpoScheme(String(args.cwd)) : undefined) ?? bundleId.split(".").pop() ?? "App";
+      scheme = String(args.scheme ?? defaultScheme);
+      ci = String(args.ci ?? "github-actions");
+      if (!CI_PROVIDERS.includes(ci)) {
+        p.log.error(`Invalid --ci "${ci}". Valid: ${CI_PROVIDERS.join(", ")}`);
+        process.exit(1);
+      }
+      profiles = String(args.profiles ?? "preview,production").split(",").map((s) => s.trim()).filter(Boolean);
+      const unknownProfiles = profiles.filter((name) => !BUILD_PROFILE_NAMES.includes(name));
+      if (profiles.length === 0 || unknownProfiles.length > 0) {
+        p.log.error(`Invalid --profiles "${profiles.join(",")}". Valid: ${BUILD_PROFILE_NAMES.join(", ")}`);
+        process.exit(1);
+      }
+      const validDistributions = DISTRIBUTIONS.filter((d) => d !== "store");
+      distributions = String(args.distribution ?? "firebase").split("+").map((s) => s.trim()).filter(Boolean);
+      const unknownDistributions = distributions.filter((d) => !validDistributions.includes(d));
+      if (distributions.length === 0 || unknownDistributions.length > 0) {
+        p.log.error(`Invalid --distribution "${distributions.join("+")}". Valid: ${validDistributions.join(", ")} (combine with "+")`);
+        process.exit(1);
+      }
+    } else {
+      projectType = await p.select({
+        message: "Project type",
+        options: PROJECT_TYPES.map((t) => ({ value: t, label: t })),
+        initialValue: "expo"
+      });
+      assertNotCancelled(projectType);
+      bundleId = await p.text({
+        message: "iOS bundle identifier (e.g. com.myapp)",
+        placeholder: "com.myapp",
+        validate: (v) => v && v.includes(".") ? undefined : "Must look like com.myapp"
+      });
+      assertNotCancelled(bundleId);
+      packageName = await p.text({
+        message: "Android package name",
+        placeholder: bundleId,
+        defaultValue: bundleId
+      });
+      assertNotCancelled(packageName);
+      const defaultScheme = (projectType === "expo" ? detectExpoScheme(String(args.cwd)) : undefined) ?? bundleId.split(".").pop() ?? "App";
+      scheme = await p.text({
+        message: "Xcode scheme (ios/<scheme>.xcworkspace)",
+        placeholder: defaultScheme,
+        defaultValue: defaultScheme
+      });
+      assertNotCancelled(scheme);
+      ci = await p.select({
+        message: "CI provider",
+        options: CI_PROVIDERS.map((c) => ({ value: c, label: c })),
+        initialValue: "github-actions"
+      });
+      assertNotCancelled(ci);
+      profiles = await p.multiselect({
+        message: "Build profiles to generate",
+        options: [
+          { value: "preview", label: "preview (android-only, firebase)" },
+          { value: "staging", label: "staging (android+ios, ad-hoc)" },
+          { value: "production", label: "production (android+ios, store)" }
+        ],
+        initialValues: ["preview", "production"],
+        required: true
+      });
+      assertNotCancelled(profiles);
+      distributions = await p.multiselect({
+        message: "Distributions to support (affects preview/staging only)",
+        options: DISTRIBUTIONS.filter((d) => d !== "store").map((d) => ({ value: d, label: d })),
+        initialValues: ["firebase"],
+        required: true
+      });
+      assertNotCancelled(distributions);
+    }
     const build = {};
     const previewDist = distributions.join("+");
     if (profiles.includes("preview")) {
@@ -297,6 +388,16 @@ var init_default = defineCommand({
       checks: { test: true, lint: true, typecheck: true },
       build
     };
+    if (args.yes) {
+      const result = ConfigSchema.safeParse(config);
+      if (!result.success) {
+        p.log.error("The requested flags produce an invalid rn-workflows.yml:");
+        for (const issue of result.error.issues) {
+          p.log.error(`  - ${issue.path.join(".") || "<root>"}: ${issue.message}`);
+        }
+        process.exit(1);
+      }
+    }
     const header = "# rn-workflows config. Run `npx rn-workflows generate` after editing.\n";
     writeFileSync(outPath, header + yaml.dump(config, { noRefs: true, lineWidth: 120 }));
     p.outro(`Wrote ${outPath}`);

@@ -28,7 +28,7 @@ bun add -d rn-workflows
 
 | Command | Description |
 | --- | --- |
-| `rn-workflows init` | Interactively create `rn-workflows.yml`. Use `--force` to overwrite. |
+| `rn-workflows init` | Interactively create `rn-workflows.yml`. Use `--force` to overwrite. `--yes` skips prompts (scripting/CI) — flags: `--bundle-id`, `--package-name`, `--project-type`, `--scheme`, `--ci`, `--profiles` (comma-separated: `preview`, `staging`, `production`), `--distribution` (`+`-combinable, e.g. `testflight+firebase`). |
 | `rn-workflows generate` | Generate Fastlane + CI files from config. Flags: `--ci <provider>`, `--dry-run`, `--config <path>`, `--cwd <dir>`, `--workflows-dir <dir>`, `--matrix`. |
 
 ## Config shape

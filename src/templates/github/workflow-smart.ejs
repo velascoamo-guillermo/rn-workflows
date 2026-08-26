@@ -157,7 +157,7 @@ jobs:
 
       - name: Upload OTA update
         run: |
-          curl -X POST <%= ota.server %>/api/upload \
+          curl -X POST <%- ota.server %>/api/upload \
             -F "file=@bundle.zip" \
             -F "runtimeVersion=${{ needs.fingerprint.outputs.hash }}" \
             -F "channel=<%= ota.channel %>" \
@@ -247,7 +247,7 @@ jobs:
       !contains(needs.*.result, 'cancelled')
     steps:
       - name: Create marker file
-        run: mkdir -p <%= appDir ? `${appDir}/` : '' %>.rn-fingerprint && echo "${{ needs.fingerprint.outputs.hash }}" > <%= appDir ? `${appDir}/` : '' %>.rn-fingerprint/hash
+        run: mkdir -p <%- appDir ? `${appDir}/` : '' %>.rn-fingerprint && echo "${{ needs.fingerprint.outputs.hash }}" > <%- appDir ? `${appDir}/` : '' %>.rn-fingerprint/hash
 
       - name: Save fingerprint to cache
         uses: actions/cache/save@v4

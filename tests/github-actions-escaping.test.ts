@@ -85,4 +85,46 @@ describe('github-actions EJS escaping of hostile-but-legal config values (#35)',
     const parsed = yaml.load(content) as WorkflowYaml;
     expect(parsed.on.push.paths).toContain(`shared/"quoted"/**`);
   });
+
+  test('ota.server is interpolated raw into the curl command, not HTML-escaped (#40)', () => {
+    // Schema forbids `&`-adjacent-to-HTML-unsafe-chars combos and `<>` at
+    // parse time (see config.test.ts); the template itself is a second line
+    // of defense against `<%=`'s HTML-escaping corrupting an
+    // already-validated-elsewhere Config's ota.server in the shell command.
+    const config: Config = {
+      project: { type: 'expo', bundleId: 'com.test.app', packageName: 'com.test.app' },
+      ci: 'github-actions',
+      build: {
+        production: {
+          platform: 'all',
+          distribution: 'store',
+          android: { buildType: 'aab' },
+          ota: { server: 'https://ota.example.com/a&b', channel: 'production' },
+        },
+      },
+    };
+    const { content } = generateGithubActions(config, { appDir: 'apps/mobile' })[0]!;
+    expect(content).not.toContain('&amp;');
+    expect(content).toContain('curl -X POST https://ota.example.com/a&b/api/upload');
+  });
+
+  test('appDir is interpolated raw into `mkdir -p`, not HTML-escaped (#40)', () => {
+    const config: Config = {
+      project: { type: 'expo', bundleId: 'com.test.app', packageName: 'com.test.app' },
+      ci: 'github-actions',
+      build: {
+        production: {
+          platform: 'all',
+          distribution: 'store',
+          android: { buildType: 'aab' },
+          ota: { server: 'https://ota.example.com', channel: 'production' },
+        },
+      },
+    };
+    // appDir is internally computed (git-root-relative path), not raw user
+    // config — but the fix is about the render path, not schema.
+    const { content } = generateGithubActions(config, { appDir: `apps/o'brien&co` })[0]!;
+    expect(content).not.toContain('&amp;');
+    expect(content).toContain(`mkdir -p apps/o'brien&co/.rn-fingerprint`);
+  });
 });

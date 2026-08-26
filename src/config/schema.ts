@@ -56,8 +56,12 @@ export const IosBuildOptionsSchema = z.object({
 
 // `ota.server`/`ota.channel` land unquoted (or double-quoted) inside a raw
 // shell `curl`/`-F` command in the generated GitHub Actions workflow — do not
-// rely on escaping there, reject unsafe characters up front instead.
-const OTA_SERVER_SAFE = /^[^\s"'`$;|&\\\n]+$/;
+// rely on escaping there, reject unsafe characters up front instead. This is
+// a strict URL charset whitelist rather than a shell-unsafe-char blacklist:
+// `<>(){}|;` and backtick/quote/space are all excluded (shell metacharacters
+// or, for `<>&"'`, characters that `<%= %>`'s HTML-escaping would otherwise
+// mangle when the value is interpolated raw into shell).
+const OTA_SERVER_SAFE = /^https?:\/\/[A-Za-z0-9._~:/?#@%&=+-]+$/;
 const OTA_CHANNEL_SAFE = /^[A-Za-z0-9_.-]+$/;
 
 export const OtaConfigSchema = z.object({

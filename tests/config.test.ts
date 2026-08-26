@@ -540,6 +540,46 @@ build:
     expect(() => parseConfig(raw)).toThrow(ConfigError);
   });
 
+  it('rejects an ota.server containing angle brackets or parens/braces (#40, HTML-entity-corruptible via <%=)', () => {
+    const raw = `
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+ci: github-actions
+build:
+  production:
+    platform: all
+    distribution: store
+    android:
+      buildType: aab
+    ota:
+      server: "https://ota.myapp.com/<script>"
+      channel: production
+`;
+    expect(() => parseConfig(raw)).toThrow(ConfigError);
+  });
+
+  it('accepts a plain https ota.server URL under the tightened charset', () => {
+    const cfg = parseConfig(`
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+ci: github-actions
+build:
+  production:
+    platform: all
+    distribution: store
+    android:
+      buildType: aab
+    ota:
+      server: https://ota.myapp.com:8443/updates?v=1
+      channel: production
+`);
+    expect(cfg.build.production?.ota?.server).toBe('https://ota.myapp.com:8443/updates?v=1');
+  });
+
   it('rejects an ota.channel containing shell/quote characters', () => {
     const raw = `
 project:

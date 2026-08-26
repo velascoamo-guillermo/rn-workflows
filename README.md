@@ -28,7 +28,7 @@ bun add -d rn-workflows
 
 | Command | Description |
 | --- | --- |
-| `rn-workflows init` | Interactively create `rn-workflows.yml`. Use `--force` to overwrite. |
+| `rn-workflows init` | Interactively create `rn-workflows.yml`. Use `--force` to overwrite. `--yes` skips prompts (scripting/CI) — flags: `--bundle-id`, `--package-name`, `--project-type`, `--scheme`, `--ci`, `--profiles` (comma-separated: `preview`, `staging`, `production`), `--distribution` (`+`-combinable, e.g. `testflight+firebase`). |
 | `rn-workflows generate` | Generate Fastlane + CI files from config. Flags: `--ci <provider>`, `--dry-run`, `--config <path>`, `--cwd <dir>`, `--workflows-dir <dir>`, `--matrix`. |
 
 ## Config shape
@@ -167,6 +167,29 @@ ci:
     - packages/shared/**
     - package.json
 ```
+
+## Verifying a release
+
+CI can validate everything `generate` writes — the Fastfile parses (`ruby -c`), the
+workflow YAML is well-formed, lint/typecheck/test pass — and it can build the app.
+What it can't do is the actual TestFlight / Firebase App Distribution / Play Store
+*upload*: that needs real Apple/Firebase/Google credentials that don't exist in a
+public CI checkout, so this is a manual last-mile check, not something `generate`
+or its test suite can automate away.
+
+To confirm a release lane really ships:
+
+1. Set every secret `SETUP.md` lists as required (`gh secret set NAME "<value>"`
+   for GitHub Actions, `glab variable set NAME` for GitLab).
+2. Trigger the workflow the way `build.<profile>` is wired to run — push to the
+   matching branch, push a tag, or `gh workflow run rn-<profile>.yml` /
+   `workflow_dispatch` (`glab ci run` on GitLab).
+3. Watch the run through the upload step (`gh run watch`, or the Actions/Pipelines
+   UI) and confirm the build actually lands in TestFlight / Firebase App
+   Distribution / the Play Console — not just that the job went green.
+
+Do this once per project (and again after any signing config change). It's the
+only part of the pipeline `rn-workflows` itself can't verify for you.
 
 ## Requirements
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { deriveRequiredSecrets, secretSetCommand } from '../src/utils/secrets.ts';
+import { buildSetupMarkdown, deriveRequiredSecrets, secretSetCommand } from '../src/utils/secrets.ts';
 import type { Config } from '../src/config/types.ts';
 
 function names(config: Config): string[] {
@@ -19,6 +19,7 @@ describe('deriveRequiredSecrets', () => {
         'ASC_KEY_ID',
         'ASC_ISSUER_ID',
         'ASC_KEY_CONTENT',
+        'ASC_KEY_IS_BASE64',
         'MATCH_GIT_BASIC_AUTHORIZATION',
         'MATCH_GIT_URL',
         'MATCH_PASSWORD',
@@ -49,6 +50,7 @@ describe('deriveRequiredSecrets', () => {
         'ASC_KEY_ID',
         'ASC_ISSUER_ID',
         'ASC_KEY_CONTENT',
+        'ASC_KEY_IS_BASE64',
         'FIREBASE_APP_ID_ANDROID',
         'FIREBASE_APP_ID_IOS',
         'FIREBASE_SERVICE_ACCOUNT_JSON',
@@ -113,6 +115,43 @@ describe('deriveRequiredSecrets', () => {
     for (const req of deriveRequiredSecrets(config)) {
       expect(req.description.length).toBeGreaterThan(0);
     }
+  });
+
+  // #34 review — Important: ASC_KEY_IS_BASE64 was wired as mandatory, but
+  // it's a flag with a false-y default (the Fastfile reads
+  // `ENV["ASC_KEY_IS_BASE64"] == "true"`), not a value CI can't run
+  // without. It stays in the returned set (env blocks render it
+  // unconditionally) but is flagged optional so downstream "required"
+  // consumers can exclude it.
+  it('marks ASC_KEY_IS_BASE64 optional; every other ios/testflight secret stays required', () => {
+    const config: Config = {
+      project: { type: 'bare', bundleId: 'com.test', packageName: 'com.test' },
+      ci: 'github-actions',
+      build: { production: { platform: 'ios', distribution: 'testflight' } },
+    };
+    const secrets = deriveRequiredSecrets(config);
+    const base64Flag = secrets.find((s) => s.name === 'ASC_KEY_IS_BASE64');
+    expect(base64Flag?.optional).toBe(true);
+
+    const others = secrets.filter((s) => s.name !== 'ASC_KEY_IS_BASE64');
+    expect(others.length).toBeGreaterThan(0);
+    for (const req of others) {
+      expect(req.optional).not.toBe(true);
+    }
+  });
+});
+
+describe('buildSetupMarkdown', () => {
+  it('lists ASC_KEY_IS_BASE64 under an "(optional)" heading', () => {
+    const config: Config = {
+      project: { type: 'bare', bundleId: 'com.test', packageName: 'com.test' },
+      ci: 'github-actions',
+      build: { production: { platform: 'ios', distribution: 'testflight' } },
+    };
+    const markdown = buildSetupMarkdown(deriveRequiredSecrets(config), 'github-actions');
+    expect(markdown).toContain('## ASC_KEY_IS_BASE64 (optional)');
+    expect(markdown).toContain('## APPLE_TEAM_ID');
+    expect(markdown).not.toContain('## APPLE_TEAM_ID (optional)');
   });
 });
 

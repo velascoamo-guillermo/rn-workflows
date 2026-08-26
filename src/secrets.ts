@@ -7,7 +7,7 @@ const ANDROID_SECRETS: Record<Distribution, string[]> = {
   store: ['PLAY_STORE_JSON_KEY'],
 };
 
-const APP_STORE_CONNECT_SECRETS = ['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_CONTENT'];
+const APP_STORE_CONNECT_SECRETS = ['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_CONTENT', 'ASC_KEY_IS_BASE64'];
 
 const IOS_SECRETS: Record<Distribution, string[]> = {
   firebase: ['FIREBASE_APP_ID_IOS', 'FIREBASE_SERVICE_ACCOUNT_JSON'],

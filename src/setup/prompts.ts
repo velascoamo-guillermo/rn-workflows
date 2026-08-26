@@ -12,3 +12,9 @@ export async function promptPassword(message: string): Promise<string> {
   if (typeof val === 'symbol') { p.cancel('Cancelled.'); process.exit(0); }
   return val;
 }
+
+export async function promptConfirm(message: string, initialValue = false): Promise<boolean> {
+  const val = await p.confirm({ message, initialValue });
+  if (typeof val === 'symbol') { p.cancel('Cancelled.'); process.exit(0); }
+  return val;
+}

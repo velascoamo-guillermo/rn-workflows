@@ -148,7 +148,6 @@ async function handleSetupMenu(cwd: string): Promise<void> {
   }
 
   const selectedSteps = buildSetupSteps(choice as SetupStepChoice);
-  if (!selectedSteps) return;
 
   try {
     await runSteps(selectedSteps, ctx);

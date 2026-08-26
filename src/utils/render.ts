@@ -60,7 +60,15 @@ export function rubySymbol(value: string): string {
 const YAML_UNSAFE_CHARS = /[:#[\]{}&*!|>'"%@`,\n\r\t]/;
 const YAML_UNSAFE_LEADING = /^[\s\-?:,[\]{}#&*!|>'"%@`]/;
 const YAML_RESERVED = /^(true|false|null|yes|no|on|off|~)$/i;
-const YAML_NUMBER_LIKE = /^[-+]?(\d+(\.\d+)?|\.\d+)$/;
+// Covers decimal (with optional underscore digit-grouping and exponent),
+// hex (`0x..`), and octal (`0o..`) forms recognized as numbers by YAML 1.1's
+// core schema / common parsers — not just plain decimal integers/floats.
+const YAML_NUMBER_LIKE =
+  /^[-+]?(0x[0-9a-fA-F][0-9a-fA-F_]*|0o[0-7][0-7_]*|\d[\d_]*(\.\d[\d_]*)?([eE][-+]?\d+)?|\.\d[\d_]*([eE][-+]?\d+)?)$/;
+// ISO 8601 date / timestamp forms YAML parses as a `!!timestamp`, not a
+// plain string, when left unquoted.
+const YAML_DATE_LIKE =
+  /^\d{4}-\d{1,2}-\d{1,2}([Tt ]\d{1,2}:\d{2}:\d{2}(\.\d+)?(\s*(Z|z|[-+]\d{1,2}(:\d{2})?))?)?$/;
 
 function needsYamlQuoting(value: string): boolean {
   if (value === '') return true;
@@ -69,6 +77,7 @@ function needsYamlQuoting(value: string): boolean {
   if (YAML_UNSAFE_CHARS.test(value)) return true;
   if (YAML_RESERVED.test(value)) return true;
   if (YAML_NUMBER_LIKE.test(value)) return true;
+  if (YAML_DATE_LIKE.test(value)) return true;
   return false;
 }
 

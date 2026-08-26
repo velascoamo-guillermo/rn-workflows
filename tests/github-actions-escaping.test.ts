@@ -57,13 +57,17 @@ describe('github-actions EJS escaping of hostile-but-legal config values (#35)',
       // generator/template must still not corrupt it via HTML-escaping if
       // ever called directly with an already-validated-elsewhere Config.
       build: {
-        preview: { platform: 'android', distribution: 'firebase' },
+        'my "cool" & profile': { platform: 'android', distribution: 'firebase' },
       },
     };
     const { content } = generateGithubActions(config)[0]!;
     const parsed = yaml.load(content) as WorkflowYaml;
-    expect(parsed.name).toBe('rn-workflows • preview');
-    expect(parsed.jobs['build-android']?.name).toBe('Build preview (android)');
+    // Scoped to the workflowName/job.name YAML fields specifically (the
+    // yamlScalar-rendered values this test targets) — NOT the fastlane
+    // `run:` line, which has its own pre-existing, out-of-scope-for-#40
+    // HTML-escaping issue for hostile build profile names.
+    expect(parsed.name).toBe('rn-workflows • my "cool" & profile');
+    expect(parsed.jobs['build-android']?.name).toBe('Build my "cool" & profile (android)');
   });
 
   test('OTA workflow (workflow-smart.ejs): extraPaths with hostile characters round-trip unchanged', () => {

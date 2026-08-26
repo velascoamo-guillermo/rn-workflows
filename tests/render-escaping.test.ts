@@ -74,6 +74,28 @@ describe('yamlScalar', () => {
   it('quotes the empty string', () => {
     expect(yamlScalar('')).toBe("''");
   });
+
+  it('quotes hex-number-like values (YAML 1.1 core schema int)', () => {
+    expect(yamlScalar('0x1A')).toBe("'0x1A'");
+    expect(yamlScalar('-0x1a')).toBe("'-0x1a'");
+  });
+
+  it('quotes octal-number-like values', () => {
+    expect(yamlScalar('0o17')).toBe("'0o17'");
+  });
+
+  it('quotes exponent-number-like values', () => {
+    expect(yamlScalar('1e10')).toBe("'1e10'");
+    expect(yamlScalar('1.5e-10')).toBe("'1.5e-10'");
+  });
+
+  it('quotes underscore-grouped-number-like values', () => {
+    expect(yamlScalar('1_000')).toBe("'1_000'");
+  });
+
+  it('quotes ISO-date-like values (YAML timestamp)', () => {
+    expect(yamlScalar('2024-01-15')).toBe("'2024-01-15'");
+  });
 });
 
 describe('yamlSingleQuoted', () => {

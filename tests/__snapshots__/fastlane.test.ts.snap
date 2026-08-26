@@ -7,7 +7,14 @@ exports[`Fastfile snapshot matches the committed Fastfile for an expo production
 default_platform(:android)
 
 before_all do
-  if ENV["ASC_KEY_ID"] && ENV["ASC_ISSUER_ID"] && ENV["ASC_KEY_CONTENT"]
+  asc_vars = {
+    "ASC_KEY_ID" => ENV["ASC_KEY_ID"],
+    "ASC_ISSUER_ID" => ENV["ASC_ISSUER_ID"],
+    "ASC_KEY_CONTENT" => ENV["ASC_KEY_CONTENT"]
+  }
+  asc_set = asc_vars.select { |_, v| v && !v.empty? }
+
+  if asc_set.length == asc_vars.length
     app_store_connect_api_key(
       key_id: ENV["ASC_KEY_ID"],
       issuer_id: ENV["ASC_ISSUER_ID"],
@@ -15,6 +22,9 @@ before_all do
       is_key_content_base64: ENV["ASC_KEY_IS_BASE64"] == "true",
       in_house: false
     )
+  elsif asc_set.length > 0
+    missing = (asc_vars.keys - asc_set.keys).join(", ")
+    UI.user_error!("Partial App Store Connect API key configuration: #{missing} missing. Set all of ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_CONTENT, or none of them to fall back to Apple ID auth.")
   end
 end
 

@@ -12,7 +12,7 @@ import { join, resolve } from 'node:path';
 describe('generate CI secrets summary + SETUP.md (CLI)', () => {
   const cli = resolve(import.meta.dir, '..', 'src', 'index.ts');
 
-  const appYaml = (distribution: string): string =>
+  const appYaml = (distribution: string, platform: string): string =>
     [
       'project:',
       '  type: bare',
@@ -22,17 +22,17 @@ describe('generate CI secrets summary + SETUP.md (CLI)', () => {
       '  provider: github-actions',
       'build:',
       '  preview:',
-      '    platform: android',
+      `    platform: ${platform}`,
       `    distribution: ${distribution}`,
       '',
     ].join('\n');
 
-  function makeRepo(distribution: string): { root: string; appDir: string } {
+  function makeRepo(distribution: string, platform: string = 'android'): { root: string; appDir: string } {
     const root = mkdtempSync(join(tmpdir(), 'rnwf-gen-secrets-'));
     execFileSync('git', ['init', '-q'], { cwd: root });
     const appDir = join(root, 'apps', 'mobile');
     mkdirSync(appDir, { recursive: true });
-    writeFileSync(join(appDir, 'rn-workflows.yml'), appYaml(distribution));
+    writeFileSync(join(appDir, 'rn-workflows.yml'), appYaml(distribution, platform));
     return { root, appDir };
   }
 
@@ -57,6 +57,27 @@ describe('generate CI secrets summary + SETUP.md (CLI)', () => {
       expect(output).toContain('Required CI secrets');
       expect(output).toContain('gh secret set FIREBASE_APP_ID_ANDROID');
       expect(output).toContain('rn-workflows setup');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // #34 review — Important: ASC_KEY_IS_BASE64 is a boolean flag with a
+  // false-y default (Fastfile reads `ENV["ASC_KEY_IS_BASE64"] == "true"`),
+  // not a value CI can't build without — so it must not inflate the
+  // "Required CI secrets" count/checklist, even though SETUP.md still
+  // documents it (under an optional heading).
+  test('excludes the optional ASC_KEY_IS_BASE64 flag from the required-secrets summary, but still documents it in SETUP.md', () => {
+    const { root, appDir } = makeRepo('testflight', 'ios');
+    try {
+      const output = runGenerate(appDir);
+      const content = readFileSync(join(appDir, 'SETUP.md'), 'utf8');
+
+      expect(content).toContain('## ASC_KEY_IS_BASE64 (optional)');
+      expect(content).toContain('## APPLE_TEAM_ID');
+
+      expect(output).not.toContain('gh secret set ASC_KEY_IS_BASE64');
+      expect(output).toContain('gh secret set APPLE_TEAM_ID');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

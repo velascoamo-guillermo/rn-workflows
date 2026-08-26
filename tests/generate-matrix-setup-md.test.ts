@@ -86,4 +86,39 @@ describe('generate --matrix secrets summary + SETUP.md (#34)', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  // #34 review — minor: the git root is a much more likely place for a repo
+  // to already have its own hand-written SETUP.md than an app subdirectory
+  // is, so `generate --matrix` must never clobber one that isn't ours.
+  test('does not clobber an existing hand-written SETUP.md at the git root', () => {
+    const root = makeMonorepo();
+    try {
+      writeFileSync(join(root, 'SETUP.md'), '# My own setup notes\n\nDo not touch.\n');
+
+      const output = runMatrix(root);
+
+      expect(readFileSync(join(root, 'SETUP.md'), 'utf8')).toContain('Do not touch.');
+
+      const fallbackPath = join(root, 'rn-workflows.SETUP.md');
+      expect(existsSync(fallbackPath)).toBe(true);
+      expect(readFileSync(fallbackPath, 'utf8')).toContain('FIREBASE_APP_ID_ANDROID');
+      expect(output).toContain('rn-workflows.SETUP.md');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('overwrites a SETUP.md at the git root it generated itself on a previous run', () => {
+    const root = makeMonorepo();
+    try {
+      runMatrix(root);
+      const output = runMatrix(root);
+
+      expect(existsSync(join(root, 'rn-workflows.SETUP.md'))).toBe(false);
+      expect(output).not.toContain('rn-workflows.SETUP.md');
+      expect(readFileSync(join(root, 'SETUP.md'), 'utf8')).toContain('FIREBASE_APP_ID_ANDROID');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

@@ -3,6 +3,23 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { SetupContext, StepResult } from './types.ts';
 import { promptText, promptConfirm } from './prompts.ts';
 
+/**
+ * Every secret name `run()` below ever assigns into `ctx.collectedSecrets`.
+ * Kept as the declared source of truth for what this step collects so
+ * tests (tests/setup-appstore.test.ts) can pin against it directly instead
+ * of reconstructing the set with a name-prefix filter over
+ * `collectRequiredSecrets` — that filter went stale the moment
+ * ASC_KEY_IS_BASE64 became optional (#34 review) and so was excluded from
+ * "required" while this step still (correctly) collects it regardless.
+ */
+export const APP_STORE_STEP_SECRET_NAMES = [
+  'APPLE_TEAM_ID',
+  'ASC_KEY_ID',
+  'ASC_ISSUER_ID',
+  'ASC_KEY_CONTENT',
+  'ASC_KEY_IS_BASE64',
+] as const;
+
 export function makeAppStoreStep() {
   return {
     id: 'appstore',

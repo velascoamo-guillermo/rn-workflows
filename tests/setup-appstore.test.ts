@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Config } from '../src/config/types.ts';
 import type { SetupContext } from '../src/setup/types.ts';
-import { collectRequiredSecrets } from '../src/setup/secrets.ts';
 
 /**
  * src/setup/appstore.ts is the only runtime path that collects ASC_* values
@@ -14,10 +13,20 @@ import { collectRequiredSecrets } from '../src/setup/secrets.ts';
  * module registry for the whole test process, not just this file, so the
  * filesystem is deliberately left real (a real temp file/dir below) instead
  * of also mocking node:fs, which would leak into unrelated tests.
+ *
+ * The prompts.ts mock itself is restored to the real module in `afterAll`
+ * (#34 review minor): without that, the stub queue-based implementation
+ * stays installed in the shared bun:test module registry for every test
+ * file that runs afterward in the same process, regardless of file
+ * ordering — any of them importing prompts.ts (directly or via
+ * commands/menu.ts, commands/setup.ts) would silently get this file's fake
+ * instead of the real @clack/prompts-backed one.
  */
 
 const promptTextQueue: string[] = [];
 const promptConfirmQueue: boolean[] = [];
+
+const realPrompts = await import('../src/setup/prompts.ts');
 
 mock.module('../src/setup/prompts.ts', () => ({
   promptText: async (_message: string) => {
@@ -32,7 +41,7 @@ mock.module('../src/setup/prompts.ts', () => ({
   },
 }));
 
-const { makeAppStoreStep } = await import('../src/setup/appstore.ts');
+const { makeAppStoreStep, APP_STORE_STEP_SECRET_NAMES } = await import('../src/setup/appstore.ts');
 
 const tmpDir = mkdtempSync(join(tmpdir(), 'rnwf-appstore-test-'));
 const keyPath = join(tmpDir, 'key.p8');
@@ -41,6 +50,7 @@ writeFileSync(keyPath, KEY_CONTENT);
 
 afterAll(() => {
   rmSync(tmpDir, { recursive: true, force: true });
+  mock.module('../src/setup/prompts.ts', () => realPrompts);
 });
 
 function baseCtx(config: Config): SetupContext {
@@ -109,19 +119,21 @@ describe('makeAppStoreStep (#34)', () => {
   });
 
   // #38 review item 2: zero test coverage meant name drift between what this
-  // step collects and what collectRequiredSecrets (the single source of
-  // truth since #34) actually demands would only surface at runtime. Pin
-  // the two together so it fails in CI instead.
-  it('collects exactly the APPLE_TEAM_ID/ASC_* names collectRequiredSecrets demands for this config', async () => {
+  // step collects and what it's declared to collect would only surface at
+  // runtime. Pin against APP_STORE_STEP_SECRET_NAMES (the step's own
+  // declared collection set) rather than filtering collectRequiredSecrets
+  // by an "ASC_" prefix — that filter went stale the moment
+  // ASC_KEY_IS_BASE64 became optional and dropped out of "required" (#34
+  // review) even though this step still collects it every time.
+  it('collects exactly the names declared in APP_STORE_STEP_SECRET_NAMES for this config', async () => {
     promptTextQueue.push('ABCD1234EF', 'KEYID123', 'ISSUER-UUID', keyPath);
     promptConfirmQueue.push(false);
 
     const ctx = baseCtx(testflightConfig);
     await makeAppStoreStep().run(ctx);
 
-    const appStoreConnectNames = collectRequiredSecrets(testflightConfig).filter(
-      (name) => name === 'APPLE_TEAM_ID' || name.startsWith('ASC_'),
+    expect(Object.keys(ctx.collectedSecrets).sort()).toEqual(
+      [...APP_STORE_STEP_SECRET_NAMES].sort(),
     );
-    expect(Object.keys(ctx.collectedSecrets).sort()).toEqual(appStoreConnectNames.sort());
   });
 });

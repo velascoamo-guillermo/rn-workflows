@@ -10,6 +10,16 @@ export const DISTRIBUTIONS = [
 export const CI_PROVIDERS = ['github-actions', 'gitlab'] as const;
 export const PROJECT_TYPES = ['expo', 'bare'] as const;
 
+// `yamlScalar`/`yamlSingleQuoted` render these as single-quoted YAML scalars
+// when they contain unsafe characters; per the YAML spec, a raw newline
+// inside a single-quoted scalar is *folded* into a space on parse (and
+// double-quoted scalars would need block-scalar handling to preserve it
+// either way) — so a value containing `\n` never round-trips byte-for-byte
+// through generated YAML. These are names/paths/URLs; a newline is never a
+// legitimate value, so reject it up front instead of trying to preserve it.
+const SINGLE_LINE_PATTERN = /^[^\r\n]*$/;
+const SINGLE_LINE_MESSAGE = 'must not contain newlines';
+
 export const PlatformSchema = z.enum(PLATFORMS);
 export const DistributionSchema = z.enum(DISTRIBUTIONS);
 export const CiSchema = z.enum(CI_PROVIDERS);
@@ -78,7 +88,10 @@ export type BuildProfile = z.infer<typeof BuildProfileSchema>;
 
 export const MatchConfigSchema = z.object({
   /** Git repo storing the `fastlane match` certificates/profiles. */
-  gitUrl: z.string().min(1, 'match.gitUrl cannot be empty'),
+  gitUrl: z
+    .string()
+    .min(1, 'match.gitUrl cannot be empty')
+    .regex(SINGLE_LINE_PATTERN, `match.gitUrl ${SINGLE_LINE_MESSAGE}`),
   /** Only "git" storage is supported today; matches match's own default. */
   storageMode: z.literal('git').optional(),
 });
@@ -118,14 +131,21 @@ export const ProjectSchema = z.object({
       BUNDLE_ID_PATTERN,
       'bundleId may only contain letters, digits, dot, hyphen, underscore (unsafe otherwise for shell/xcargs interpolation)',
     ),
-  packageName: z.string().min(1),
+  packageName: z
+    .string()
+    .min(1)
+    .regex(SINGLE_LINE_PATTERN, `packageName ${SINGLE_LINE_MESSAGE}`),
   /**
    * Xcode scheme / project name, i.e. `ios/<scheme>.xcworkspace`.
    * For Expo projects this is derived from `expo.name` in app.json by
    * `expo prebuild` — NOT from the bundle id. Leave unset to auto-detect
    * (Expo) or fall back to the last segment of `bundleId`.
    */
-  scheme: z.string().min(1).optional(),
+  scheme: z
+    .string()
+    .min(1)
+    .regex(SINGLE_LINE_PATTERN, `scheme ${SINGLE_LINE_MESSAGE}`)
+    .optional(),
   /** App-wide iOS signing config: development team id and `fastlane match` repo. */
   ios: IosProjectConfigSchema.optional(),
 });
@@ -140,9 +160,18 @@ export type Checks = z.infer<typeof ChecksSchema>;
 
 export const CiObjectSchema = z.object({
   provider: CiSchema,
-  workflowsDir: z.string().min(1, 'workflowsDir cannot be empty').optional(),
+  workflowsDir: z
+    .string()
+    .min(1, 'workflowsDir cannot be empty')
+    .regex(SINGLE_LINE_PATTERN, `workflowsDir ${SINGLE_LINE_MESSAGE}`)
+    .optional(),
   extraPaths: z
-    .array(z.string().min(1, 'extraPaths entries cannot be empty'))
+    .array(
+      z
+        .string()
+        .min(1, 'extraPaths entries cannot be empty')
+        .regex(SINGLE_LINE_PATTERN, `extraPaths entries ${SINGLE_LINE_MESSAGE}`),
+    )
     .optional(),
 });
 

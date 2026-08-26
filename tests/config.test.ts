@@ -456,6 +456,90 @@ build:
     expect(() => parseConfig(raw)).toThrow(ConfigError);
   });
 
+  it('rejects a packageName containing a newline (YAML single-quote folding, #40)', () => {
+    const raw = `
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: "com.myapp\\nbackdoor"
+ci: github-actions
+build:
+  preview:
+    platform: android
+    distribution: firebase
+`;
+    expect(() => parseConfig(raw)).toThrow(ConfigError);
+  });
+
+  it('rejects a project.scheme containing a newline', () => {
+    const raw = `
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+  scheme: "My\\nScheme"
+ci: github-actions
+build:
+  preview:
+    platform: android
+    distribution: firebase
+`;
+    expect(() => parseConfig(raw)).toThrow(ConfigError);
+  });
+
+  it('rejects a project.ios.match.gitUrl containing a newline', () => {
+    const raw = `
+project:
+  type: bare
+  bundleId: com.myapp
+  packageName: com.myapp
+  ios:
+    match:
+      gitUrl: "https://github.com/org/repo.git\\nEvil-Header: x"
+ci: github-actions
+build:
+  preview:
+    platform: ios
+    distribution: testflight
+`;
+    expect(() => parseConfig(raw)).toThrow(ConfigError);
+  });
+
+  it('rejects a ci.workflowsDir containing a newline', () => {
+    const raw = `
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+ci:
+  provider: github-actions
+  workflowsDir: ".github/workflows\\nevil"
+build:
+  preview:
+    platform: android
+    distribution: firebase
+`;
+    expect(() => parseConfig(raw)).toThrow(ConfigError);
+  });
+
+  it('rejects a ci.extraPaths entry containing a newline', () => {
+    const raw = `
+project:
+  type: expo
+  bundleId: com.myapp
+  packageName: com.myapp
+ci:
+  provider: github-actions
+  extraPaths:
+    - "packages/shared/**\\nevil"
+build:
+  preview:
+    platform: android
+    distribution: firebase
+`;
+    expect(() => parseConfig(raw)).toThrow(ConfigError);
+  });
+
   it('rejects an ota.channel containing shell/quote characters', () => {
     const raw = `
 project:

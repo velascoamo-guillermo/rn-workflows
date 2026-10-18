@@ -96,7 +96,7 @@ export function generateGithubActions(
       const e2e: E2eView | undefined =
         profile.ota && maestro && e2eLegs.includes(platform)
           ? {
-              cacheKey: yamlScalar(e2eCacheKey(leg, hashExpr)),
+              cacheKey: yamlScalar(e2eCacheKey(leg, resolveStagingChannel(profile.ota), hashExpr)),
               stagingChannel: yamlScalar(resolveStagingChannel(profile.ota)),
               flows: yamlScalar(maestro.flows),
               appId: yamlScalar(

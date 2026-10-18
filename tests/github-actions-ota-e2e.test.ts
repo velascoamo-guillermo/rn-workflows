@@ -41,10 +41,10 @@ const byId = (id: string) => (s: WorkflowStep): boolean => s.id === id;
 const isFastlane = (s: WorkflowStep): boolean => s.run?.startsWith('bundle exec fastlane') ?? false;
 
 describe('e2eCacheKey', () => {
-  test('rnw-e2e-[<slug>-]<profile>-<platform>-<hash>', () => {
-    expect(e2eCacheKey({ profile: 'production', platform: 'ios' }, 'abc')).toBe('rnw-e2e-production-ios-abc');
-    expect(e2eCacheKey({ appSlug: 'pawlog', profile: 'production', platform: 'android' }, 'abc')).toBe(
-      'rnw-e2e-pawlog-production-android-abc',
+  test('rnw-e2e-[<slug>-]<profile>-<platform>-<stagingChannel>-<hash>', () => {
+    expect(e2eCacheKey({ profile: 'production', platform: 'ios' }, 'staging', 'abc')).toBe('rnw-e2e-production-ios-staging-abc');
+    expect(e2eCacheKey({ appSlug: 'pawlog', profile: 'production', platform: 'android' }, 'qa', 'abc')).toBe(
+      'rnw-e2e-pawlog-production-android-qa-abc',
     );
   });
 });
@@ -103,7 +103,7 @@ describe('ota-<p> with e2e: package → upload(staging) → binary → guard →
       expect(restore.uses).toBe('actions/cache/restore@v4');
       expect(restore.with).toEqual({
         path: `\${{ runner.temp }}/rnw-e2e/${p}`,
-        key: `rnw-e2e-production-${p}-\${{ needs.fingerprint.outputs.${p}_hash }}`,
+        key: `rnw-e2e-production-${p}-staging-\${{ needs.fingerprint.outputs.${p}_hash }}`,
       });
       for (const id of ['e2e-prebuild', 'e2e-patch', 'e2e-build', 'e2e-save']) {
         expect({ id, if: job.steps.find(byId(id))!.if }).toEqual({ id, if: "steps.e2e-cache.outputs.cache-hit != 'true'" });
@@ -146,22 +146,35 @@ describe('ota-<p> with e2e: package → upload(staging) → binary → guard →
 
 describe('native-<p> with e2e: binary → flows (no guard) → fastlane → tag', () => {
   for (const p of ['ios', 'android'] as const) {
-    test(`${p}: e2e before recheck/fastlane, cache saved before fastlane, no guard`, () => {
+    test(`${p}: fresh build → flows → cache save → fastlane, no guard`, () => {
       const job = all.jobs[`native-${p}`]!;
+      const build = idx(job, byId('e2e-build'));
       const save = idx(job, byId('e2e-save'));
-      const flows = idx(job, byId(p === 'ios' ? 'maestro' : 'maestro-script'));
+      const flows = idx(job, byId('maestro'));
       const fastlane = idx(job, isFastlane);
-      expect(save).toBeGreaterThan(-1);
-      expect(flows).toBeGreaterThan(save);
-      expect(fastlane).toBeGreaterThan(flows);
+      expect(build).toBeGreaterThan(-1);
+      expect(flows).toBeGreaterThan(build);
+      expect(save).toBeGreaterThan(flows);
+      expect(fastlane).toBeGreaterThan(save);
       expect(idx(job, byId('recheck'))).toBe(fastlane - 1);
       expect(idx(job, byId('tag'))).toBeGreaterThan(fastlane);
       expect(job.steps.some(byId('guard-flow'))).toBe(false);
       expect(JSON.stringify(job.steps)).not.toContain('rnw-assert-update');
       expect(JSON.stringify(job.steps)).not.toContain('RNW_EXPECTED_UPDATE_ID');
-      expect(job.steps.find(byId('e2e-cache'))!.with?.key).toBe(
-        `rnw-e2e-production-${p}-\${{ needs.fingerprint.outputs.${p}_hash }}`,
+      expect(job.steps.find(byId('e2e-save'))!.with?.key).toBe(
+        `rnw-e2e-production-${p}-staging-\${{ needs.fingerprint.outputs.${p}_hash }}`,
       );
+    });
+
+    test(`${p}: never restores the test-binary cache; builds unconditionally`, () => {
+      const job = all.jobs[`native-${p}`]!;
+      expect(job.steps.some(byId('e2e-cache'))).toBe(false);
+      expect(job.steps.some((s) => s.uses?.startsWith('actions/cache/restore'))).toBe(false);
+      expect(JSON.stringify(job.steps)).not.toContain('cache-hit');
+      for (const id of ['e2e-prebuild', 'e2e-patch', 'e2e-build', 'e2e-save', 'e2e-unpatch']) {
+        expect({ id, if: job.steps.find(byId(id))!.if }).toEqual({ id, if: undefined });
+      }
+      expect(all.jobs[`ota-${p}`]!.steps.find(byId('e2e-cache'))!.uses).toBe('actions/cache/restore@v4');
     });
   }
 
@@ -233,7 +246,7 @@ describe('platform coverage', () => {
     const emu = wf.jobs['ota-android']!.steps.find((s) => s.uses?.startsWith('reactivecircus/android-emulator-runner@'))!;
     expect(emu.with?.['working-directory']).toBe('apps/x');
     expect(wf.jobs['ota-ios']!.steps.find(byId('e2e-cache'))!.with?.key).toBe(
-      'rnw-e2e-x-production-ios-${{ needs.fingerprint.outputs.ios_hash }}',
+      'rnw-e2e-x-production-ios-staging-${{ needs.fingerprint.outputs.ios_hash }}',
     );
   });
 });

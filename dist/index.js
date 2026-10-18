@@ -771,8 +771,8 @@ function nativeTagPrefix({ appSlug, profile, platform }) {
 function legConcurrencyGroup({ appSlug, profile, platform }) {
   return ["rnw", ...appSlug ? [appSlug] : [], profile, platform].join("-");
 }
-function e2eCacheKey(leg, hash) {
-  return ["rnw", "e2e", ...leg.appSlug ? [leg.appSlug] : [], leg.profile, leg.platform, hash].join("-");
+function e2eCacheKey(leg, stagingChannel, hash) {
+  return ["rnw", "e2e", ...leg.appSlug ? [leg.appSlug] : [], leg.profile, leg.platform, stagingChannel, hash].join("-");
 }
 
 // src/generators/github-actions.ts
@@ -815,7 +815,7 @@ function generateGithubActions(config, options = {}) {
       const hashExpr = `\${{ needs.fingerprint.outputs.${platform}_hash }}`;
       const maestro = profile.e2e?.maestro;
       const e2e = profile.ota && maestro && e2eLegs.includes(platform) ? {
-        cacheKey: yamlScalar(e2eCacheKey(leg, hashExpr)),
+        cacheKey: yamlScalar(e2eCacheKey(leg, resolveStagingChannel(profile.ota), hashExpr)),
         stagingChannel: yamlScalar(resolveStagingChannel(profile.ota)),
         flows: yamlScalar(maestro.flows),
         appId: yamlScalar(platform === "ios" ? config.project.bundleId : config.project.packageName ?? config.project.bundleId),

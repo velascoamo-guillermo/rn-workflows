@@ -3,8 +3,11 @@
   with the debug keystore) whose expo-updates config points at the staging
   channel, cached by runtimeVersion at $RUNNER_TEMP/rnw-e2e/android/app.apk.
   The store binary is never patched: the manifest is restored right after.
-  Locals: e2e (view from github-actions.ts), expoCli, projectType, hashExpr.
+  Locals: e2e (view from github-actions.ts), expoCli, projectType, hashExpr,
+  restore (bool: OTA path restores/saves the cache and skips the build on a
+  hit; the native path always builds fresh and saves after its flows pass).
 -%>
+<% if (restore) { -%>
       - name: Restore e2e test binary (android)
         id: e2e-cache
         uses: actions/cache/restore@v4
@@ -12,10 +15,13 @@
           path: ${{ runner.temp }}/rnw-e2e/android
           key: <%- e2e.cacheKey %>
 
+<% } -%>
 <% if (projectType === 'expo') { -%>
       - name: Prebuild native project for e2e (android)
         id: e2e-prebuild
+<% if (restore) { -%>
         if: steps.e2e-cache.outputs.cache-hit != 'true'
+<% } -%>
         env:
           RNW_PLATFORM: android
         run: <%- expoCli %> prebuild --platform "$RNW_PLATFORM" --clean
@@ -23,7 +29,9 @@
 <% } -%>
       - name: Point test binary at the staging channel (android)
         id: e2e-patch
+<% if (restore) { -%>
         if: steps.e2e-cache.outputs.cache-hit != 'true'
+<% } -%>
         env:
           RNW_STAGING_CHANNEL: <%- e2e.stagingChannel %>
         run: |
@@ -51,7 +59,9 @@
 
 <% if (setupJava) { -%>
       - name: Setup JDK
+<% if (restore) { -%>
         if: steps.e2e-cache.outputs.cache-hit != 'true'
+<% } -%>
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -60,7 +70,9 @@
 <% } -%>
       - name: Build e2e test binary (android release apk)
         id: e2e-build
+<% if (restore) { -%>
         if: steps.e2e-cache.outputs.cache-hit != 'true'
+<% } -%>
         env:
           EXPO_UPDATES_FINGERPRINT_OVERRIDE: <%- hashExpr %>
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"
@@ -72,17 +84,14 @@
           mkdir -p "$OUT"
           cp android/app/build/outputs/apk/release/app-release.apk "$OUT/app.apk"
 
-      - name: Save e2e test binary (android)
-        id: e2e-save
-        if: steps.e2e-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ runner.temp }}/rnw-e2e/android
-          key: <%- e2e.cacheKey %>
-
+<% if (restore) { -%>
+<%- include('e2e-save-step', { platform: 'android' }) -%>
+<% } -%>
       - name: Restore native project after the test build (android)
         id: e2e-unpatch
+<% if (restore) { -%>
         if: steps.e2e-cache.outputs.cache-hit != 'true'
+<% } -%>
 <% if (projectType === 'expo') { -%>
         run: cp "$RUNNER_TEMP/rnw-e2e-orig/AndroidManifest.xml" android/app/src/main/AndroidManifest.xml
 <% } else { -%>

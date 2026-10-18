@@ -177,7 +177,7 @@ jobs:
           xcode-version: latest-stable
 
 <% } -%>
-<%- include(`partials/e2e-binary-${job.platform}`, { e2e: job.e2e, hashExpr: job.hashExpr, setupJava: true }) -%>
+<%- include(`partials/e2e-binary-${job.platform}`, { e2e: job.e2e, hashExpr: job.hashExpr, setupJava: true, restore: true }) -%>
 <%- include(`partials/maestro-${job.platform}`, { e2e: job.e2e, guard: true, selfHosted: job.selfHosted }) -%>
 <%- include('partials/ota-upload-step', { stepId: 'promote', stepName: 'Promote OTA update to production channel', hashExpr: job.hashExpr }) -%>
 <% } else { -%>
@@ -258,8 +258,9 @@ jobs:
         run: <%= packageManager === 'bun' ? 'bun install --frozen-lockfile' : packageManager === 'npm' ? 'npm ci' : 'yarn install --frozen-lockfile' %>
 
 <% if (job.e2e) { -%>
-<%- include(`partials/e2e-binary-${job.platform}`, { e2e: job.e2e, hashExpr: job.hashExpr, setupJava: false }) -%>
+<%- include(`partials/e2e-binary-${job.platform}`, { e2e: job.e2e, hashExpr: job.hashExpr, setupJava: false, restore: false }) -%>
 <%- include(`partials/maestro-${job.platform}`, { e2e: job.e2e, guard: false, selfHosted: job.selfHosted }) -%>
+<%- include('partials/e2e-save-step', { platform: job.platform, e2e: job.e2e, restore: false }) -%>
 <% } -%>
 <%- include('partials/native-recheck-step', { tagPrefix: job.tagPrefix, hashExpr: `\${{ needs.fingerprint.outputs.${job.platform}_hash }}` }) -%>
       - name: Run Fastlane lane <%= job.lane %> (<%= job.platform %>)

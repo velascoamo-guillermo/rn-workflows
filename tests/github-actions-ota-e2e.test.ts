@@ -189,6 +189,14 @@ describe('native-<p> with e2e: binary → flows (no guard) → fastlane → tag'
     }
   });
 
+  test('OTA ship path has no native-project restore step (nothing uses the native dir afterwards)', () => {
+    for (const p of ['ios', 'android'] as const) {
+      expect(all.jobs[`ota-${p}`]!.steps.some((s) => (s.id ?? '').endsWith('e2e-unpatch'))).toBe(false);
+      expect(all.jobs[`native-${p}`]!.steps.some(byId('ota-e2e-unpatch'))).toBe(false);
+      expect(all.jobs[`native-${p}`]!.steps.some(byId('e2e-unpatch'))).toBe(true);
+    }
+  });
+
   test('bare project: git checkout of the native dir', () => {
     const bare: Config = { ...allCfg, project: { ...allCfg.project, type: 'bare' } };
     const wf = parseWorkflow(generateGithubActions(bare, { scheme: 'OtaAll' })[0]!.content);

@@ -2,7 +2,8 @@
   Android e2e test binary: assembleRelease APK (Expo's template signs release
   with the debug keystore) whose expo-updates config points at the staging
   channel, cached by runtimeVersion at $RUNNER_TEMP/rnw-e2e/android/app.apk.
-  The store binary is never patched: the manifest is restored right after.
+  The store binary is never patched: the manifest is restored right after
+  on the native path (the OTA path never builds a store binary).
   Locals: e2e (view from github-actions.ts), expoCli, projectType, hashExpr,
   restore (bool: OTA path restores/saves the cache and skips the build on a
   hit; the native path always builds fresh and saves after its flows pass),
@@ -92,6 +93,7 @@
 <% if (restore) { -%>
 <%- include('e2e-save-step', { platform: 'android' }) -%>
 <% } -%>
+<% if (!restore) { -%>
       - name: Restore native project after the test build (android)
         id: <%= idPrefix %>e2e-unpatch
 <% if (buildIf) { -%>
@@ -103,3 +105,4 @@
         run: git checkout -- android
 <% } -%>
 
+<% } -%>

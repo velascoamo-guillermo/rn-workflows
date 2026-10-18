@@ -51,3 +51,71 @@ function readName(parsed: unknown): string | undefined {
   if (typeof top === 'string' && top.trim()) return top.trim();
   return undefined;
 }
+
+export type ExpoUpdatesConfig =
+  | { kind: 'none' }
+  | { kind: 'dynamic' }
+  | {
+      kind: 'static';
+      runtimePolicy: string | undefined;
+      updatesUrl: string | undefined;
+      channel: string | undefined;
+      codeSigning: boolean;
+      hasExpoUpdates: boolean;
+    };
+
+function asRecord(v: unknown): Record<string, unknown> | undefined {
+  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === 'string' ? v : undefined;
+}
+
+function hasExpoUpdatesDep(appDir: string): boolean {
+  try {
+    const pkg = asRecord(JSON.parse(readFileSync(resolve(appDir, 'package.json'), 'utf8')));
+    return ['dependencies', 'devDependencies'].some((k) => asRecord(pkg?.[k])?.['expo-updates'] !== undefined);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Best-effort read of the OTA-relevant parts of a static Expo config. `dynamic`
+ * when only app.config.js/ts exists (cannot be evaluated safely), `none` when
+ * there is no config at all.
+ */
+export function readExpoUpdatesConfig(appDir: string): ExpoUpdatesConfig {
+  for (const file of APP_CONFIG_FILES) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(resolve(appDir, file), 'utf8'));
+    } catch {
+      continue;
+    }
+    const root = asRecord(parsed);
+    const expo = asRecord(root?.['expo']) ?? root;
+    if (!expo) continue;
+    const runtime = expo['runtimeVersion'];
+    const updates = asRecord(expo['updates']);
+    const headers = asRecord(updates?.['requestHeaders']);
+    return {
+      kind: 'static',
+      runtimePolicy: str(asRecord(runtime)?.['policy']),
+      updatesUrl: str(updates?.['url']),
+      channel: str(headers?.['expo-channel-name']),
+      codeSigning: updates?.['codeSigningCertificate'] !== undefined,
+      hasExpoUpdates: hasExpoUpdatesDep(appDir),
+    };
+  }
+  for (const f of ['app.config.js', 'app.config.ts', 'app.config.mjs', 'app.config.cjs']) {
+    try {
+      readFileSync(resolve(appDir, f));
+      return { kind: 'dynamic' };
+    } catch {
+      /* next */
+    }
+  }
+  return { kind: 'none' };
+}

@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import yaml from 'js-yaml';
@@ -264,4 +264,165 @@ describe('e2e: fresh Expo app -> init -> generate (#31 acceptance)', () => {
       }
     });
   }
+});
+
+/**
+ * rn-workflows 0.3 acceptance (#55): fresh app with `ota` + `e2e.maestro`,
+ * single app and two-app monorepo. Drives the shipped dist CLI with the
+ * canned configs in tests/fixtures/fresh-app/.
+ */
+const FIXTURES = join(REPO_ROOT, 'tests', 'fixtures', 'fresh-app');
+
+const hasActionlint = spawnSync('actionlint', ['-version'], { stdio: 'ignore' }).status === 0;
+
+function copyFixture(name: string, dest: string): void {
+  mkdirSync(join(dest, '..'), { recursive: true });
+  writeFileSync(dest, readFileSync(join(FIXTURES, name), 'utf8'));
+}
+
+function stripAnsi(s: string): string {
+  return s.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g'), '');
+}
+
+interface FullStep {
+  name?: string;
+  run?: string;
+  env?: Record<string, string>;
+}
+interface FullWorkflow {
+  jobs: Record<string, { steps?: FullStep[] }>;
+}
+
+function allRunScripts(wf: FullWorkflow): string[] {
+  return Object.values(wf.jobs).flatMap((j) => (j.steps ?? []).map((s) => s.run).filter((r): r is string => !!r));
+}
+
+function stepNames(wf: FullWorkflow): string[] {
+  return Object.values(wf.jobs).flatMap((j) => (j.steps ?? []).map((s) => s.name ?? ''));
+}
+
+function actionlint(file: string): { status: number | null; output: string } {
+  const r = spawnSync('actionlint', [file], { encoding: 'utf8' });
+  return { status: r.status, output: `${r.stdout}${r.stderr}` };
+}
+
+describe('e2e: fresh Expo app with ota + e2e.maestro (0.3 acceptance)', () => {
+  // realpath: macOS tmpdir is a symlink (/var -> /private/var); git resolves it, so path filters would diverge.
+  const appDir = realpathSync(mkdtempSync(join(tmpdir(), 'rnwf-e2e-ota-')));
+  copyFixture('ota-app.json', join(appDir, 'app.json'));
+  copyFixture('ota-package.json', join(appDir, 'package.json'));
+  copyFixture('rn-workflows-ota-e2e.yml', join(appDir, 'rn-workflows.yml'));
+  writeFileSync(join(appDir, 'bun.lock'), '');
+  execFileSync('git', ['init', '-q'], { cwd: appDir });
+
+  afterAll(() => rmSync(appDir, { recursive: true, force: true }));
+
+  const generate = runCli(['generate', '--cwd', appDir], appDir);
+  const workflowPaths = listWorkflowFiles(appDir);
+  const wf = (): FullWorkflow => yaml.load(readFileSync(workflowPaths[0]!, 'utf8')) as FullWorkflow;
+
+  test('generate exits 0 with zero warnings', () => {
+    expect(generate.status).toBe(0);
+    expect(stripAnsi(`${generate.stdout}${generate.stderr}`).toLowerCase()).not.toContain('warn');
+  });
+
+  test('emits exactly one workflow with fingerprint + per-platform ota/native jobs', () => {
+    expect(workflowPaths).toHaveLength(1);
+    const jobs = Object.keys(wf().jobs);
+    for (const j of ['fingerprint', 'ota-ios', 'ota-android', 'native-ios', 'native-android']) {
+      expect(jobs).toContain(j);
+    }
+    expect(jobs).not.toContain('ota-update');
+    expect(jobs).not.toContain('save-fingerprint');
+  });
+
+  test('contains staging upload, update-id guard, Maestro run and auto-promote steps', () => {
+    const names = stepNames(wf());
+    expect(names).toContain('Upload OTA update to staging channel');
+    expect(names).toContain('Write update-id guard flow');
+    expect(names).toContain('Install Maestro');
+    expect(names).toContain('Run Maestro flows (ios)');
+    expect(names).toContain('Run Maestro flows (android emulator)');
+    expect(names).toContain('Promote OTA update to production channel');
+  });
+
+  test('no ${{ expression appears inside any run: script', () => {
+    for (const script of allRunScripts(wf())) expect(script).not.toContain('${{');
+  });
+
+  test('SETUP.md lists every referenced secret, including OTA_UPLOAD_KEY, plus the OTA section', () => {
+    const setupMd = readFileSync(join(appDir, 'SETUP.md'), 'utf8');
+    const referenced = secretsReferencedIn(workflowPaths);
+    expect(referenced).toContain('OTA_UPLOAD_KEY');
+    for (const name of referenced) {
+      expect(setupMd).toContain(`## ${name}`);
+      expect(setupMd).toContain(`gh secret set ${name}`);
+    }
+    expect(setupMd).toContain('## OTA updates');
+    expect(setupMd).toContain('rnw-update-id');
+  });
+
+  test.skipIf(!hasActionlint)('generated workflow passes actionlint', () => {
+    const r = actionlint(workflowPaths[0]!);
+    expect(r.output).toBe('');
+    expect(r.status).toBe(0);
+  });
+});
+
+describe('e2e: two-app monorepo with ota + e2e (0.3 acceptance)', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'rnwf-e2e-mono-')));
+  copyFixture('monorepo-ios-app.json', join(root, 'apps', 'ios', 'app.json'));
+  copyFixture('monorepo-ios-package.json', join(root, 'apps', 'ios', 'package.json'));
+  copyFixture('rn-workflows-monorepo-ios.yml', join(root, 'apps', 'ios', 'rn-workflows.yml'));
+  copyFixture('ota-app.json', join(root, 'apps', 'two', 'app.json'));
+  copyFixture('ota-package.json', join(root, 'apps', 'two', 'package.json'));
+  copyFixture('rn-workflows-ota-e2e.yml', join(root, 'apps', 'two', 'rn-workflows.yml'));
+  writeFileSync(join(root, 'bun.lock'), '');
+  execFileSync('git', ['init', '-q'], { cwd: root });
+
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  const generate = runCli(['generate', '--matrix', '--cwd', root], root);
+  const matrixPath = join(root, '.github', 'workflows', 'rn-release-matrix.yml');
+
+  test('generate --matrix exits 0 with zero warnings', () => {
+    expect(generate.status).toBe(0);
+    expect(stripAnsi(`${generate.stdout}${generate.stderr}`).toLowerCase()).not.toContain('warn');
+  });
+
+  test('writes only the root matrix workflow and SETUP.md; no fastlane or per-app workflows', () => {
+    expect(listWorkflowFiles(root)).toEqual([matrixPath]);
+    expect(existsSync(join(root, 'SETUP.md'))).toBe(true);
+    expect(existsSync(join(root, 'fastlane'))).toBe(false);
+    for (const app of ['ios', 'two']) {
+      expect(existsSync(join(root, 'apps', app, 'fastlane'))).toBe(false);
+      expect(existsSync(join(root, 'apps', app, '.github'))).toBe(false);
+    }
+  });
+
+  test('matrix workflow has push trigger, plan/ota/native jobs, staging upload, guard and promote', () => {
+    const content = readFileSync(matrixPath, 'utf8');
+    const parsed = yaml.load(content) as FullWorkflow;
+    const jobs = Object.keys(parsed.jobs);
+    for (const j of ['plan', 'ota', 'native']) expect(jobs).toContain(j);
+    expect(content).toMatch(/^  push:\n    branches: \[main\]/m);
+    const names = stepNames(parsed);
+    expect(names).toContain('Upload OTA update to staging channel');
+    expect(names).toContain('Write update-id guard flow');
+    expect(names).toContain('Promote OTA update to production channel');
+    for (const script of allRunScripts(parsed)) expect(script).not.toContain('${{');
+  });
+
+  test('SETUP.md documents every secret referenced by the matrix workflow', () => {
+    const setupMd = readFileSync(join(root, 'SETUP.md'), 'utf8');
+    const referenced = secretsReferencedIn([matrixPath]);
+    expect(referenced).toContain('OTA_UPLOAD_KEY');
+    for (const name of referenced) expect(setupMd).toContain(`## ${name}`);
+  });
+
+  test.skipIf(!hasActionlint)('matrix workflow passes actionlint', () => {
+    const r = actionlint(matrixPath);
+    expect(r.output).toBe('');
+    expect(r.status).toBe(0);
+  });
 });

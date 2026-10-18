@@ -1,0 +1,13 @@
+{
+  "name": "mono-ios",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "jest",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "expo": "~51.0.0",
+    "expo-updates": "~0.29.0"
+  }
+}

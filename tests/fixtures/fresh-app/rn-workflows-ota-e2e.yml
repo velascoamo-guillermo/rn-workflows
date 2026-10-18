@@ -1,0 +1,20 @@
+project:
+  type: expo
+  bundleId: com.example.fresh
+  packageName: com.example.fresh
+ci: github-actions
+build:
+  production:
+    platform: all
+    distribution: testflight+store
+    android:
+      buildType: aab
+    ios:
+      exportMethod: app-store
+    ota:
+      server: https://ota.example.com
+      channel: production
+      stagingChannel: staging
+    e2e:
+      maestro:
+        flows: .maestro

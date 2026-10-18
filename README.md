@@ -100,6 +100,52 @@ project:
   `app_identifier` from `project.bundleId`). Omit it to keep the current
   behavior of not generating a Matchfile.
 
+## OTA updates and Maestro e2e (GitHub Actions)
+
+Opt a build profile into a fingerprint-driven pipeline with `ota` (and optionally `e2e.maestro`). On push, each platform is routed independently: if a native release already exists for its fingerprint the change ships as an OTA update (uploaded to the staging channel, e2e-tested, then auto-promoted to the production channel); otherwise a native binary is built, e2e-tested, and uploaded to TestFlight / Play internal.
+
+```yaml
+ci:
+  provider: github-actions
+  runners:                       # optional, labels per platform job
+    ios: [self-hosted, macos-arm]
+    android: [self-hosted, linux]
+  env:                           # optional, non-secret workflow-level env
+    SENTRY_DISABLE_AUTO_UPLOAD: 'true'
+build:
+  production:
+    platform: all
+    distribution: testflight+store
+    ota:
+      server: https://ota.example.com
+      channel: production        # production channel, promoted to automatically
+      stagingChannel: staging    # optional, default `staging`
+    e2e:
+      maestro:
+        flows: .maestro          # relative path of Maestro flows in the repo
+        platforms: [ios]         # optional, default: the profile's platforms
+        iosDevice: iPhone 16 Pro Max   # optional simulator name
+```
+
+| Key | Meaning |
+| --- | --- |
+| `ota.server` | Base URL of your Expo OTA server. |
+| `ota.channel` | Production channel; the staged bundle is promoted here after e2e is green. |
+| `ota.stagingChannel` | Channel the e2e test binary pulls from before promotion. Default `staging`; must differ from `channel`. |
+| `e2e.maestro.flows` | Directory of Maestro flows (relative, no `..`). |
+| `e2e.maestro.platforms` | Subset of `ios`, `android` to run e2e on. Defaults to the profile's platforms. |
+| `e2e.maestro.iosDevice` | iOS simulator device name. |
+| `ci.runners.ios` / `ci.runners.android` | Runner labels for platform jobs (self-hosted supported). |
+| `ci.env` | Extra non-secret env vars. Keys with reserved prefixes (`RNW_`, `GITHUB_`, `RUNNER_`, `ACTIONS_`), secret names and loader-injection variables are rejected. |
+
+Notes:
+
+- The Play track defaults to `internal` when `ota` is set (override with `android.track`).
+- Per-platform `runtimeVersion` comes from `expo-updates runtimeversion:resolve`. Use the `fingerprint` runtime-version policy: the CI run fails if a 2-platform app resolves the same value for both platforms.
+- Your app must render `Updates.updateId` in an element with testID `rnw-update-id`; a generated Maestro pre-flow asserts it equals the staging update id before your flows run.
+- `generate --matrix` supports the same keys per app and adds push-triggered change detection; Fastlane files remain per-app.
+- Android e2e is beta (not yet proven live), a matrix cannot mix Expo and bare apps for e2e, the Maestro installer is not checksummed, and the Android emulator is x86_64 only.
+
 ## Supported distributions
 
 | Key | Target |

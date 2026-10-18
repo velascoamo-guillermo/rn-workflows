@@ -18,6 +18,15 @@ const IOS_SECRETS: Record<Distribution, string[]> = {
 
 const IOS_SIGNING_SECRETS = ['MATCH_PASSWORD', 'MATCH_GIT_URL'];
 
+/** Every secret name any distribution/platform can require. */
+export const ALL_SECRET_NAMES: readonly string[] = [
+  ...new Set([
+    ...Object.values(ANDROID_SECRETS).flat(),
+    ...Object.values(IOS_SECRETS).flat(),
+    ...IOS_SIGNING_SECRETS,
+  ]),
+].sort();
+
 export function secretsFor(
   platform: 'android' | 'ios',
   distributionRaw: string,

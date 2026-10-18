@@ -1,0 +1,28 @@
+project:
+  type: expo
+  bundleId: com.example.selfhosted
+  packageName: com.example.selfhosted
+
+ci:
+  provider: github-actions
+  runners:
+    ios:
+      - self-hosted
+      - macos-arm
+  env:
+    SENTRY_DISABLE_AUTO_UPLOAD: 'true'
+
+build:
+  production:
+    platform: ios
+    distribution: testflight
+    ios:
+      exportMethod: app-store
+    ota:
+      server: http://localhost:3000
+      channel: production
+      stagingChannel: staging
+    e2e:
+      maestro:
+        flows: .maestro
+        iosDevice: iPhone 16 Pro Max

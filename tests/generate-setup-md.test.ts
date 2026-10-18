@@ -103,3 +103,83 @@ describe('generate CI secrets summary + SETUP.md (CLI)', () => {
     }
   });
 });
+
+describe('generate OTA readiness section in SETUP.md (CLI)', () => {
+  const cli = resolve(import.meta.dir, '..', 'src', 'index.ts');
+  const fixtures = resolve(import.meta.dir, 'fixtures', 'expo-app-json');
+
+  const yaml = (ota: boolean): string =>
+    [
+      'project:',
+      '  type: expo',
+      '  bundleId: com.test.app',
+      '  packageName: com.test.app',
+      'ci:',
+      '  provider: github-actions',
+      'build:',
+      '  release:',
+      '    platform: android',
+      '    distribution: firebase',
+      ...(ota ? ['    ota:', '      server: https://ota.example.com', '      channel: production'] : []),
+      '',
+    ].join('\n');
+
+  function makeApp(root: string, name: string, fixture: string, ota: boolean): string {
+    const dir = join(root, 'apps', name);
+    mkdirSync(dir, { recursive: true });
+    for (const f of ['app.json', 'app.config.ts', 'package.json']) {
+      const src = join(fixtures, fixture, f);
+      if (existsSync(src)) writeFileSync(join(dir, f), readFileSync(src));
+    }
+    writeFileSync(join(dir, 'rn-workflows.yml'), yaml(ota));
+    return dir;
+  }
+
+  const run = (args: string[]): string =>
+    execFileSync('bun', [cli, 'generate', ...args], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+
+  test('with ota: SETUP.md gets the OTA section and the console prints warnings', () => {
+    const root = mkdtempSync(join(tmpdir(), 'rnwf-ota-setup-'));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    try {
+      const dir = makeApp(root, 'app', 'wrong-channel', true);
+      const output = run(['--cwd', dir]);
+      const content = readFileSync(join(dir, 'SETUP.md'), 'utf8');
+      expect(content).toContain('## OTA updates');
+      expect(content).toContain('expo-channel-name');
+      expect(output).toContain('expo-channel-name');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('without ota: SETUP.md has no OTA section', () => {
+    const root = mkdtempSync(join(tmpdir(), 'rnwf-ota-setup-'));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    try {
+      const dir = makeApp(root, 'app', 'ready', false);
+      run(['--cwd', dir]);
+      expect(readFileSync(join(dir, 'SETUP.md'), 'utf8')).not.toContain('OTA updates');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('--matrix aggregates OTA findings per app in one section', () => {
+    const root = mkdtempSync(join(tmpdir(), 'rnwf-ota-setup-'));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    try {
+      makeApp(root, 'alpha', 'wrong-url', true);
+      makeApp(root, 'beta', 'no-policy', true);
+      run(['--matrix', '--cwd', root]);
+      const content = readFileSync(join(root, 'SETUP.md'), 'utf8');
+      expect(content.match(/## OTA updates/g)).toHaveLength(1);
+      expect(content).toContain('apps/alpha/release');
+      expect(content).toContain('updates.url');
+      expect(content).toContain('apps/beta/release');
+      expect(content).toContain('fingerprint');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

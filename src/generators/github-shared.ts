@@ -46,3 +46,13 @@ export function nativeTagPrefix({ appSlug, profile, platform }: LegRef): string 
 export function legConcurrencyGroup({ appSlug, profile, platform }: LegRef): string {
   return ['rnw', ...(appSlug ? [appSlug] : []), profile, platform].join('-');
 }
+
+/**
+ * actions/cache key for a leg's staging-patched e2e test binary:
+ * `rnw-e2e-[<slug>-]<profile>-<platform>-<stagingChannel>-<hash>`. The channel
+ * is baked into the binary, so renaming it must miss. `hash` is usually the
+ * fingerprint job's output expression; cached at `$RUNNER_TEMP/rnw-e2e/<platform>`.
+ */
+export function e2eCacheKey(leg: LegRef, stagingChannel: string, hash: string): string {
+  return ['rnw', 'e2e', ...(leg.appSlug ? [leg.appSlug] : []), leg.profile, leg.platform, stagingChannel, hash].join('-');
+}

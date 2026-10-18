@@ -1,0 +1,20 @@
+<%#
+  Write the update-id guard flow: launch the app and wait until the element
+  with testID rnw-update-id shows the expected update id (proves the staging
+  update ran, not the embedded bundle). Maestro substitutes ${...} via -e.
+-%>
+      - name: Write update-id guard flow
+        id: guard-flow
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/rnw-assert-update.yaml" <<'YAML'
+          appId: ${RNW_APP_ID}
+          ---
+          - launchApp
+          - extendedWaitUntil:
+              visible:
+                id: rnw-update-id
+                text: ${RNW_EXPECTED_UPDATE_ID}
+              timeout: 60000
+          YAML
+

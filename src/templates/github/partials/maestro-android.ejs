@@ -1,0 +1,53 @@
+<%#
+  Maestro on an Android emulator (reactivecircus/android-emulator-runner,
+  API 34 x86_64, KVM on hosted runners). The emulator action runs `script:`
+  line by line, so the steps live in a generated bash script; values reach it
+  through the action's env, never `${{` in the script.
+  Locals: e2e (view), guard (bool), maestroVersion, selfHosted, appDir.
+-%>
+<%- include('maestro-install-step') -%>
+<% if (!selfHosted) { -%>
+      - name: Enable KVM
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+<% } -%>
+<% if (guard) { -%>
+<%- include('guard-flow-step') -%>
+<% } -%>
+      - name: Write Maestro script (android)
+        id: maestro-script
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/rnw-maestro.sh" <<'SH'
+          set -euo pipefail
+          adb install -r "$RUNNER_TEMP/rnw-e2e/android/app.apk"
+<% if (guard) { -%>
+          maestro test -e "RNW_APP_ID=$RNW_APP_ID" -e "RNW_EXPECTED_UPDATE_ID=$RNW_EXPECTED_UPDATE_ID" "$RUNNER_TEMP/rnw-assert-update.yaml"
+          maestro test -e "RNW_EXPECTED_UPDATE_ID=$RNW_EXPECTED_UPDATE_ID" "./$RNW_FLOWS"
+<% } else { -%>
+          maestro test "./$RNW_FLOWS"
+<% } -%>
+          SH
+
+      - name: Run Maestro flows (android emulator)
+        id: maestro
+        uses: reactivecircus/android-emulator-runner@<%= emulatorRunnerVersion %>
+        env:
+          RNW_APP_ID: <%- e2e.appId %>
+          RNW_FLOWS: <%- e2e.flows %>
+<% if (guard) { -%>
+          RNW_EXPECTED_UPDATE_ID: ${{ steps.update-id.outputs.update_id }}
+<% } -%>
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+<% if (appDir) { -%>
+          working-directory: <%- yamlScalar(appDir) %>
+<% } -%>
+          script: bash "$RUNNER_TEMP/rnw-maestro.sh"
+

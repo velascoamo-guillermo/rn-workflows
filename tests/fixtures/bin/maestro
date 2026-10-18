@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Maestro CLI stub for e2e tests. Logs each invocation to $MAESTRO_LOG.
+set -u
+
+if [ -n "${MAESTRO_LOG:-}" ]; then
+  printf '%s\n' "$*" >> "$MAESTRO_LOG"
+  if [ -n "${RNW_EXPECTED_UPDATE_ID:-}" ]; then
+    printf '%s\n' "ENV RNW_EXPECTED_UPDATE_ID=${RNW_EXPECTED_UPDATE_ID}" >> "$MAESTRO_LOG"
+  fi
+fi
+
+exit "${MAESTRO_STUB_EXIT:-0}"

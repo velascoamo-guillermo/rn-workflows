@@ -1,14 +1,30 @@
-import type { Config } from '../config/schema.ts';
+import { e2ePlatforms, resolveStagingChannel, type Config } from '../config/schema.ts';
 import { renderTemplate, yamlScalar } from '../utils/render.ts';
 import { platformsFor, secretsFor } from '../secrets.ts';
 import {
+  e2eCacheKey,
   isSelfHosted,
   legConcurrencyGroup,
   nativeTagPrefix,
   renderRunsOn,
   runsOnFor,
 } from './github-shared.ts';
-import type { GeneratedFile } from './fastlane.ts';
+import { resolveScheme, type GeneratedFile } from './fastlane.ts';
+
+/** Maestro CLI version pinned in the conditional install. */
+export const MAESTRO_VERSION = '2.11.0';
+/** reactivecircus/android-emulator-runner, pinned to a full release tag. */
+export const EMULATOR_RUNNER_VERSION = 'v2.38.0';
+
+/** Per-leg e2e view for the smart workflow partials (YAML-rendered values). */
+interface E2eView {
+  cacheKey: string;
+  stagingChannel: string;
+  flows: string;
+  appId: string;
+  scheme: string;
+  iosDevice?: string;
+}
 
 const DEFAULT_BRANCH: Record<string, string> = {
   preview: 'develop',
@@ -48,6 +64,8 @@ export interface GithubActionsOptions {
    * Default: `.github/workflows`.
    */
   workflowsPathFromRoot?: string;
+  /** Auto-detected Xcode scheme (e2e simulator build), used only when `project.scheme` is unset. */
+  scheme?: string;
 }
 
 export function generateGithubActions(
@@ -60,6 +78,7 @@ export function generateGithubActions(
   const slugPrefix = options.appSlug ? `${options.appSlug}-` : '';
   const workflowsPathFromRoot = options.workflowsPathFromRoot ?? '.github/workflows';
   const extraPaths = config.extraPaths ?? [];
+  const scheme = resolveScheme(config, options.scheme);
   const files: GeneratedFile[] = [];
 
   for (const [name, profile] of Object.entries(config.build)) {
@@ -68,8 +87,27 @@ export function generateGithubActions(
       key,
       value: yamlScalar(value),
     }));
+    const e2eLegs = profile.ota && profile.e2e ? e2ePlatforms(profile) : [];
     const jobs = platforms.map((platform) => {
       const runsOn = runsOnFor(config, platform);
+      const leg = { appSlug: options.appSlug, profile: name, platform };
+      const hashExpr = `\${{ needs.fingerprint.outputs.${platform}_hash }}`;
+      const maestro = profile.e2e?.maestro;
+      const e2e: E2eView | undefined =
+        profile.ota && maestro && e2eLegs.includes(platform)
+          ? {
+              cacheKey: yamlScalar(e2eCacheKey(leg, resolveStagingChannel(profile.ota), hashExpr)),
+              stagingChannel: yamlScalar(resolveStagingChannel(profile.ota)),
+              flows: yamlScalar(maestro.flows),
+              appId: yamlScalar(
+                platform === 'ios'
+                  ? config.project.bundleId
+                  : (config.project.packageName ?? config.project.bundleId),
+              ),
+              scheme: yamlScalar(scheme),
+              ...(maestro.iosDevice ? { iosDevice: yamlScalar(maestro.iosDevice) } : {}),
+            }
+          : undefined;
       return {
         id: `build-${platform}`,
         name: `Build ${name} (${platform})`,
@@ -80,8 +118,10 @@ export function generateGithubActions(
         env: jobEnv,
         secrets: secretsFor(platform, profile.distribution),
         // Smart (OTA) workflow only; unused by workflow.ejs.
-        tagPrefix: yamlScalar(nativeTagPrefix({ appSlug: options.appSlug, profile: name, platform })),
-        concurrencyGroup: yamlScalar(legConcurrencyGroup({ appSlug: options.appSlug, profile: name, platform })),
+        tagPrefix: yamlScalar(nativeTagPrefix(leg)),
+        concurrencyGroup: yamlScalar(legConcurrencyGroup(leg)),
+        hashExpr,
+        e2e,
       };
     });
 
@@ -112,6 +152,9 @@ export function generateGithubActions(
             otaServer: yamlScalar(profile.ota.server),
             otaChannel: yamlScalar(profile.ota.channel),
             expoCli: expoCliFor(packageManager),
+            projectType: config.project.type,
+            maestroVersion: MAESTRO_VERSION,
+            emulatorRunnerVersion: EMULATOR_RUNNER_VERSION,
           }
         : {}),
     });

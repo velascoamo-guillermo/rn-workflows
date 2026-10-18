@@ -1,0 +1,90 @@
+<%#
+  iOS e2e test binary: Release simulator build (unsigned) whose expo-updates
+  config points at the staging channel, cached by runtimeVersion at
+  $RUNNER_TEMP/rnw-e2e/ios/app.app. The store binary is never patched: the
+  native dir is restored right after the test build.
+  Locals: e2e (view from github-actions.ts), expoCli, projectType, hashExpr,
+  restore (bool: OTA path restores/saves the cache and skips the build on a
+  hit; the native path always builds fresh and saves after its flows pass).
+-%>
+<% if (restore) { -%>
+      - name: Restore e2e test binary (ios)
+        id: e2e-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/rnw-e2e/ios
+          key: <%- e2e.cacheKey %>
+
+<% } -%>
+<% if (projectType === 'expo') { -%>
+      - name: Prebuild native project for e2e (ios)
+        id: e2e-prebuild
+<% if (restore) { -%>
+        if: steps.e2e-cache.outputs.cache-hit != 'true'
+<% } -%>
+        env:
+          RNW_PLATFORM: ios
+        run: <%- expoCli %> prebuild --platform "$RNW_PLATFORM" --clean
+
+<% } -%>
+      - name: Point test binary at the staging channel (ios)
+        id: e2e-patch
+<% if (restore) { -%>
+        if: steps.e2e-cache.outputs.cache-hit != 'true'
+<% } -%>
+        env:
+          RNW_SCHEME: <%- e2e.scheme %>
+          RNW_STAGING_CHANNEL: <%- e2e.stagingChannel %>
+        run: |
+          set -euo pipefail
+          PLIST="ios/$RNW_SCHEME/Supporting/Expo.plist"
+          if [ ! -f "$PLIST" ]; then
+            echo "::error::$PLIST not found; set project.scheme in rn-workflows.yml to the Xcode scheme"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/rnw-e2e-orig"
+          cp "$PLIST" "$RUNNER_TEMP/rnw-e2e-orig/Expo.plist"
+          HEADERS=$(jq -cn --arg channel "$RNW_STAGING_CHANNEL" '{"expo-channel-name": $channel}')
+          plutil -replace EXUpdatesRequestHeaders -json "$HEADERS" "$PLIST"
+          plutil -replace EXUpdatesLaunchWaitMs -integer 30000 "$PLIST"
+
+      - name: Build e2e test binary (ios simulator)
+        id: e2e-build
+<% if (restore) { -%>
+        if: steps.e2e-cache.outputs.cache-hit != 'true'
+<% } -%>
+        env:
+          RNW_SCHEME: <%- e2e.scheme %>
+          EXPO_UPDATES_FINGERPRINT_OVERRIDE: <%- hashExpr %>
+        run: |
+          set -euo pipefail
+          DERIVED="$RUNNER_TEMP/rnw-e2e-derived"
+          xcodebuild -workspace "ios/$RNW_SCHEME.xcworkspace" -scheme "$RNW_SCHEME" \
+            -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$DERIVED" CODE_SIGNING_ALLOWED=NO build
+          APP=$(find "$DERIVED/Build/Products/Release-iphonesimulator" -maxdepth 1 -name '*.app' | head -n1)
+          if [ -z "$APP" ]; then
+            echo "::error::no .app produced by the simulator build"
+            exit 1
+          fi
+          OUT="$RUNNER_TEMP/rnw-e2e/ios"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          cp -R "$APP" "$OUT/app.app"
+
+<% if (restore) { -%>
+<%- include('e2e-save-step', { platform: 'ios' }) -%>
+<% } -%>
+      - name: Restore native project after the test build (ios)
+        id: e2e-unpatch
+<% if (restore) { -%>
+        if: steps.e2e-cache.outputs.cache-hit != 'true'
+<% } -%>
+<% if (projectType === 'expo') { -%>
+        env:
+          RNW_SCHEME: <%- e2e.scheme %>
+        run: cp "$RUNNER_TEMP/rnw-e2e-orig/Expo.plist" "ios/$RNW_SCHEME/Supporting/Expo.plist"
+<% } else { -%>
+        run: git checkout -- ios
+<% } -%>
+

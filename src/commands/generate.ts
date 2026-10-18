@@ -311,6 +311,7 @@ export default defineCommand({
     const githubOptions: GithubActionsOptions = {
       packageManager,
       workflowsDir,
+      ...(detectedScheme ? { scheme: detectedScheme } : {}),
       ...(appDir ? { appDir, appSlug: slugify(basename(appDirAbs)) } : {}),
       ...(gitRoot ? { workflowsPathFromRoot: toPosixRelative(gitRoot, workflowsDir) } : {}),
     };

@@ -11,7 +11,7 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { generateGithubActions } from '../src/generators/github-actions';
 import type { Config } from '../src/config/schema';
-import { getStep, runStep } from './helpers/run-step';
+import { getStep, parseWorkflow, runStep } from './helpers/run-step';
 
 const fixtures = resolve(import.meta.dir, 'fixtures', 'ota');
 const IOS_HASH = '3f9a1c7e5b2d8046a9e1f3c7d25b8e0a4c6f9d12';
@@ -298,5 +298,232 @@ describe('upload step', () => {
   test('fails the step on HTTP 400 (bad upload key)', async () => {
     const { r } = await upload('ios', 400, {});
     expect(r.code).not.toBe(0);
+  });
+});
+
+describe('e2e (staging-patched test binary + Maestro)', () => {
+  const e2eFixtures = resolve(import.meta.dir, 'fixtures', 'e2e');
+  const maestroStub = resolve(import.meta.dir, 'fixtures', 'bin', 'maestro');
+  const e2eCfg: Config = {
+    ...config,
+    build: {
+      production: {
+        ...config.build.production!,
+        ota: { server: 'https://ota.myapp.com', channel: 'production', stagingChannel: 'qa-staging' },
+        e2e: { maestro: { flows: '.maestro' } },
+      },
+    },
+  };
+  const e2eContent = generateGithubActions(e2eCfg, { scheme: 'OtaAll' })[0]!.content;
+  const UPDATE_ID = '0d3f6c1a-2b4e-4c8d-9a7f-1e2d3c4b5a69';
+
+  function binDir(): string {
+    const bin = tmp();
+    cpSync(maestroStub, join(bin, 'maestro'));
+    chmodSync(join(bin, 'maestro'), 0o755);
+    return bin;
+  }
+
+  test('android manifest patch: staging channel header + 30s launch wait, rest intact', async () => {
+    const app = tmp();
+    const dir = join(app, 'android', 'app', 'src', 'main');
+    mkdirSync(dir, { recursive: true });
+    cpSync(join(e2eFixtures, 'AndroidManifest.xml'), join(dir, 'AndroidManifest.xml'));
+    const step = getStep(e2eContent, 'ota-android', 'e2e-patch');
+    expect(step.env?.RNW_STAGING_CHANNEL).toBe('qa-staging');
+    const r = await runStep(step, { cwd: app, env: { RNW_STAGING_CHANNEL: 'qa-staging', RUNNER_TEMP: tmp() } });
+    expect(r.code).toBe(0);
+    const xml = readFileSync(join(dir, 'AndroidManifest.xml'), 'utf8');
+    expect(xml).toContain(
+      '<meta-data android:name="expo.modules.updates.UPDATES_CONFIGURATION_REQUEST_HEADERS_KEY" android:value="{&quot;expo-channel-name&quot;:&quot;qa-staging&quot;}"/>',
+    );
+    expect(xml).toContain('<meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="30000"/>');
+    expect(xml).not.toContain('production');
+    expect(xml).toContain('expo.modules.updates.EXPO_UPDATE_URL');
+    expect(xml.match(/UPDATES_CONFIGURATION_REQUEST_HEADERS_KEY/g)).toHaveLength(1);
+  });
+
+  test('android manifest patch inserts the meta-data when prebuild did not emit it', async () => {
+    const app = tmp();
+    const dir = join(app, 'android', 'app', 'src', 'main');
+    mkdirSync(dir, { recursive: true });
+    const original = readFileSync(join(e2eFixtures, 'AndroidManifest.xml'), 'utf8')
+      .split('\n')
+      .filter((l) => !l.includes('REQUEST_HEADERS_KEY') && !l.includes('LAUNCH_WAIT_MS'))
+      .join('\n');
+    writeFileSync(join(dir, 'AndroidManifest.xml'), original);
+    const r = await runStep(getStep(e2eContent, 'ota-android', 'e2e-patch'), {
+      cwd: app,
+      env: { RNW_STAGING_CHANNEL: 'qa-staging', RUNNER_TEMP: tmp() },
+    });
+    expect(r.code).toBe(0);
+    const xml = readFileSync(join(dir, 'AndroidManifest.xml'), 'utf8');
+    expect(xml).toContain('&quot;expo-channel-name&quot;:&quot;qa-staging&quot;');
+    expect(xml).toContain('EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="30000"');
+    expect(xml.indexOf('LAUNCH_WAIT_MS')).toBeLessThan(xml.indexOf('</application>'));
+  });
+
+  test.skipIf(process.platform !== 'darwin')('ios plist patch: staging channel header + 30s launch wait', async () => {
+    const app = tmp();
+    const dir = join(app, 'ios', 'OtaAll', 'Supporting');
+    mkdirSync(dir, { recursive: true });
+    const plist = join(dir, 'Expo.plist');
+    cpSync(join(e2eFixtures, 'Expo.plist'), plist);
+    const step = getStep(e2eContent, 'ota-ios', 'e2e-patch');
+    const r = await runStep(step, { cwd: app, env: { RNW_SCHEME: 'OtaAll', RNW_STAGING_CHANNEL: 'qa-staging', RUNNER_TEMP: tmp() } });
+    expect(r.code).toBe(0);
+    const json = spawnSync('plutil', ['-convert', 'json', '-o', '-', plist], { encoding: 'utf8' }).stdout;
+    const parsed = JSON.parse(json) as Record<string, unknown>;
+    expect(parsed.EXUpdatesRequestHeaders).toEqual({ 'expo-channel-name': 'qa-staging' });
+    expect(parsed.EXUpdatesLaunchWaitMs).toBe(30000);
+    expect(parsed.EXUpdatesURL).toBe('https://ota.example.com/api/manifest');
+  });
+
+  test('ios patch fails loudly when the plist is missing', async () => {
+    const r = await runStep(getStep(e2eContent, 'ota-ios', 'e2e-patch'), {
+      cwd: tmp(),
+      env: { RNW_SCHEME: 'OtaAll', RNW_STAGING_CHANNEL: 'qa-staging', RUNNER_TEMP: tmp() },
+    });
+    expect(r.code).not.toBe(0);
+  });
+
+  test('expo unpatch restores the pre-patch native file (store binary never patched)', async () => {
+    const app = tmp();
+    const runnerTemp = tmp();
+    const dir = join(app, 'android', 'app', 'src', 'main');
+    mkdirSync(dir, { recursive: true });
+    const manifest = join(dir, 'AndroidManifest.xml');
+    cpSync(join(e2eFixtures, 'AndroidManifest.xml'), manifest);
+    const before = readFileSync(manifest, 'utf8');
+    const env = { RNW_STAGING_CHANNEL: 'qa-staging', RUNNER_TEMP: runnerTemp };
+    expect((await runStep(getStep(e2eContent, 'native-android', 'e2e-patch'), { cwd: app, env })).code).toBe(0);
+    expect(readFileSync(manifest, 'utf8')).not.toBe(before);
+    expect((await runStep(getStep(e2eContent, 'native-android', 'e2e-unpatch'), { cwd: app, env })).code).toBe(0);
+    expect(readFileSync(manifest, 'utf8')).toBe(before);
+  });
+
+  test('ios: maestro runs the update-id guard first, then the user flows, both with the update id', async () => {
+    const app = tmp();
+    const runnerTemp = tmp();
+    const log = join(tmp(), 'maestro.log');
+    const env = { RUNNER_TEMP: runnerTemp, MAESTRO_LOG: log, RNW_EXPECTED_UPDATE_ID: UPDATE_ID, RNW_UDID: 'SIM-UDID', RNW_FLOWS: '.maestro', RNW_APP_ID: 'com.test.app' };
+    expect((await runStep(getStep(e2eContent, 'ota-ios', 'guard-flow'), { cwd: app, env })).code).toBe(0);
+    const flow = readFileSync(join(runnerTemp, 'rnw-assert-update.yaml'), 'utf8');
+    expect(flow).toContain('appId: ${RNW_APP_ID}');
+    expect(flow).toMatch(/- launchApp[\s\S]*- extendedWaitUntil:\n {4}visible:\n {6}id: rnw-update-id\n {6}text: \$\{RNW_EXPECTED_UPDATE_ID\}/);
+    const r = await runStep(getStep(e2eContent, 'ota-ios', 'maestro'), { cwd: app, env, pathDirs: [binDir()] });
+    expect(r.code).toBe(0);
+    const calls = readFileSync(log, 'utf8').split('\n').filter((l) => !l.startsWith('ENV ') && l);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain(`${runnerTemp}/rnw-assert-update.yaml`);
+    expect(calls[0]).toContain(`RNW_EXPECTED_UPDATE_ID=${UPDATE_ID}`);
+    expect(calls[0]).toContain('--device SIM-UDID');
+    expect(calls[1]).toContain('./.maestro');
+    expect(calls[1]).toContain(`RNW_EXPECTED_UPDATE_ID=${UPDATE_ID}`);
+  });
+
+  test('ios: a red guard stops before the user flows', async () => {
+    const runnerTemp = tmp();
+    const log = join(tmp(), 'maestro.log');
+    const env = { RUNNER_TEMP: runnerTemp, MAESTRO_LOG: log, MAESTRO_STUB_EXIT: '1', RNW_EXPECTED_UPDATE_ID: UPDATE_ID, RNW_UDID: 'X', RNW_FLOWS: '.maestro', RNW_APP_ID: 'com.test.app' };
+    const r = await runStep(getStep(e2eContent, 'ota-ios', 'maestro'), { cwd: tmp(), env, pathDirs: [binDir()] });
+    expect(r.code).not.toBe(0);
+    expect(readFileSync(log, 'utf8')).not.toContain('./.maestro');
+  });
+
+  test('android: emulator script installs the apk, then guard, then flows', async () => {
+    const app = tmp();
+    const runnerTemp = tmp();
+    const log = join(tmp(), 'maestro.log');
+    const bin = binDir();
+    writeFileSync(join(bin, 'adb'), `#!/bin/sh\nprintf 'ADB %s\\n' "$*" >> "$MAESTRO_LOG"\n`);
+    chmodSync(join(bin, 'adb'), 0o755);
+    const env = { RUNNER_TEMP: runnerTemp, MAESTRO_LOG: log, RNW_EXPECTED_UPDATE_ID: UPDATE_ID, RNW_FLOWS: '.maestro', RNW_APP_ID: 'com.test.app' };
+    expect((await runStep(getStep(e2eContent, 'ota-android', 'guard-flow'), { cwd: app, env })).code).toBe(0);
+    expect((await runStep(getStep(e2eContent, 'ota-android', 'maestro-script'), { cwd: app, env })).code).toBe(0);
+    const emu = parseWorkflow(e2eContent).jobs['ota-android']!.steps.find((s) => s.uses?.startsWith('reactivecircus/'))!;
+    expect(emu.env).toMatchObject({ RNW_EXPECTED_UPDATE_ID: '${{ steps.update-id.outputs.update_id }}', RNW_FLOWS: '.maestro' });
+    const r = await runStep({ run: String(emu.with?.script) }, { cwd: app, env, pathDirs: [bin] });
+    expect(r.code).toBe(0);
+    const calls = readFileSync(log, 'utf8').split('\n').filter((l) => !l.startsWith('ENV ') && l);
+    expect(calls[0]).toBe(`ADB install -r ${runnerTemp}/rnw-e2e/android/app.apk`);
+    expect(calls[1]).toContain('rnw-assert-update.yaml');
+    expect(calls[1]).toContain(`RNW_EXPECTED_UPDATE_ID=${UPDATE_ID}`);
+    expect(calls[2]).toContain('./.maestro');
+  });
+
+  test('native: flows only, no guard, no update id', async () => {
+    const log = join(tmp(), 'maestro.log');
+    const env = { RUNNER_TEMP: tmp(), MAESTRO_LOG: log, RNW_UDID: 'X', RNW_FLOWS: '.maestro', RNW_APP_ID: 'com.test.app' };
+    const r = await runStep(getStep(e2eContent, 'native-ios', 'maestro'), { cwd: tmp(), env, pathDirs: [binDir()] });
+    expect(r.code).toBe(0);
+    const out = readFileSync(log, 'utf8');
+    expect(out.trim().split('\n')).toHaveLength(1);
+    expect(out).toContain('./.maestro');
+    expect(out).not.toContain('rnw-assert-update');
+    expect(out).not.toContain('RNW_EXPECTED_UPDATE_ID');
+  });
+
+  test('simulator: RNW_IOS_DEVICE by name, else the first iPhone; UDID exported', async () => {
+    const bin = tmp();
+    const devices = {
+      devices: {
+        'com.apple.CoreSimulator.SimRuntime.iOS-18-0': [
+          { name: 'iPad Air', udid: 'IPAD-1', isAvailable: true },
+          { name: 'iPhone 16', udid: 'IPHONE-16', isAvailable: true },
+          { name: 'iPhone 16 Pro Max', udid: 'IPHONE-16PM', isAvailable: true },
+        ],
+      },
+    };
+    const xlog = join(bin, 'xcrun.log');
+    writeFileSync(join(bin, 'devices.json'), JSON.stringify(devices));
+    writeFileSync(
+      join(bin, 'xcrun'),
+      `#!/bin/sh\nprintf '%s\\n' "$*" >> "${xlog}"\ncase "$*" in "simctl list devices available -j") cat "${join(bin, 'devices.json')}" ;; esac\n`,
+    );
+    chmodSync(join(bin, 'xcrun'), 0o755);
+    const step = getStep(e2eContent, 'ota-ios', 'simulator');
+    const runnerTemp = tmp();
+    const first = await runStep(step, { cwd: tmp(), env: { RUNNER_TEMP: runnerTemp }, pathDirs: [bin] });
+    expect(first.code).toBe(0);
+    expect(first.outputs.udid).toBe('IPHONE-16');
+    expect(readFileSync(xlog, 'utf8')).toContain(`simctl install IPHONE-16 ${runnerTemp}/rnw-e2e/ios/app.app`);
+    const named = await runStep(step, { cwd: tmp(), env: { RUNNER_TEMP: runnerTemp, RNW_IOS_DEVICE: 'iPhone 16 Pro Max' }, pathDirs: [bin] });
+    expect(named.outputs.udid).toBe('IPHONE-16PM');
+    const missing = await runStep(step, { cwd: tmp(), env: { RUNNER_TEMP: runnerTemp, RNW_IOS_DEVICE: 'iPhone 3G' }, pathDirs: [bin] });
+    expect(missing.code).not.toBe(0);
+  });
+
+  test('maestro install is skipped when maestro is already on PATH (self-hosted)', async () => {
+    const bin = binDir();
+    writeFileSync(join(bin, 'curl'), '#!/bin/sh\necho curl-called >&2\nexit 7\n');
+    chmodSync(join(bin, 'curl'), 0o755);
+    const ghPath = join(tmp(), 'github_path');
+    writeFileSync(ghPath, '');
+    const r = await runStep(getStep(e2eContent, 'ota-ios', 'maestro-install'), {
+      cwd: tmp(),
+      env: { GITHUB_PATH: ghPath, MAESTRO_VERSION: '2.11.0' },
+      pathDirs: [bin],
+    });
+    expect(r.code).toBe(0);
+    expect(r.stderr).not.toContain('curl-called');
+  });
+
+  test('maestro install downloads the pinned version when missing', async () => {
+    const bin = tmp();
+    const clog = join(bin, 'curl.log');
+    writeFileSync(join(bin, 'curl'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${clog}"\nprintf 'echo "installer MAESTRO_VERSION=$MAESTRO_VERSION" >> "${clog}"\\n'\n`);
+    chmodSync(join(bin, 'curl'), 0o755);
+    const ghPath = join(tmp(), 'github_path');
+    writeFileSync(ghPath, '');
+    const r = await runStep(getStep(e2eContent, 'ota-ios', 'maestro-install'), {
+      cwd: tmp(),
+      env: { GITHUB_PATH: ghPath, MAESTRO_VERSION: '2.11.0' },
+      pathDirs: [bin],
+    });
+    if (spawnSync('sh', ['-c', 'command -v maestro']).status === 0) return;
+    expect(r.code).toBe(0);
+    expect(readFileSync(clog, 'utf8')).toContain('installer MAESTRO_VERSION=2.11.0');
+    expect(readFileSync(ghPath, 'utf8')).toContain('.maestro/bin');
   });
 });

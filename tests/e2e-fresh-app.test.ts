@@ -281,7 +281,7 @@ function copyFixture(name: string, dest: string): void {
 }
 
 function stripAnsi(s: string): string {
-  return s.replace(/\u001b\[[0-9;]*m/g, '');
+  return s.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g'), '');
 }
 
 interface FullStep {

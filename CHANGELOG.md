@@ -4,6 +4,49 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.3.0 - Unreleased
+
+### BREAKING (configs with `ota`)
+
+- Generated job names changed: `ota-<platform>` / `native-<platform>` replace
+  `ota-update` and `save-fingerprint`.
+- "Native release exists" is now looked up through git tags
+  `rnw/native/...` instead of the Actions cache. The legacy cache marker is
+  **not** read, so the first run per platform after upgrading rebuilds
+  natively once.
+- `runtimeVersion` is resolved per platform with
+  `expo-updates runtimeversion:resolve`; the run fails if a 2-platform app
+  resolves the same value for both (use the `fingerprint` policy).
+- The Play track defaults to `internal` when `ota` is set (set
+  `android.track` to override).
+
+### Added
+
+- `ota.stagingChannel`, `e2e.maestro` (`flows`, `platforms`, `iosDevice`),
+  `ci.runners` and `ci.env` (with reserved-key validation).
+- Self-hosted runner toolchain setup.
+- Staging upload, e2e update-id guard, Maestro run and auto-promote to the
+  production channel.
+- `generate --matrix`: push trigger with change detection, plan-time
+  fingerprint routing, ota/native matrices; a native re-check that finds
+  another run already released the fingerprint ships the commit as an OTA.
+- OTA/e2e readiness checks and an "OTA updates" section in `SETUP.md`.
+- Fresh-app acceptance tests for ota+e2e (single app and monorepo).
+
+### Changed
+
+- Upload hardening: `--form-string`, upload key passed via stdin, timeouts,
+  non-2xx HTTP responses fail the job.
+- All user/event/secret values reach generated `run:` scripts only through
+  `env:`.
+
+### Known limitations
+
+- Android e2e is beta and unproven live.
+- Matrix e2e cannot mix Expo and bare apps.
+- The Maestro installer is not checksummed.
+- The Android emulator is x86_64 only.
+
 ## 0.2.0 - 2026-08-04
 
 ### Added

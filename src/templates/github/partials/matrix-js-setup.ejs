@@ -1,0 +1,20 @@
+<%#
+  Matrix jobs: Node (+ Bun) and the frozen-lockfile JS install in matrix.dir.
+  Locals: packageManager. Byte-identical to the pre-0.3 matrix job steps.
+-%>
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+<% if (packageManager !== 'bun') { -%>
+          cache: <%= packageManager %>
+<% } -%>
+
+<% if (packageManager === 'bun') { -%>
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+<% } -%>
+      - name: Install JS dependencies
+        run: <%= packageManager === 'bun' ? 'bun install --frozen-lockfile' : packageManager === 'npm' ? 'npm ci' : 'yarn install --frozen-lockfile' %>
+

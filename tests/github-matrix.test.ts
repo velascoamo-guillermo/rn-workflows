@@ -75,7 +75,6 @@ interface ReleaseLeg {
   platform: string;
   runsOn: string;
   ota: boolean;
-  otaUpload: boolean;
   otaServer: string;
   otaChannel: string;
 }
@@ -99,6 +98,48 @@ function legsFromEnv<T>(parsed: WorkflowYaml, key: string): T[] {
   expect(raw).toBeDefined();
   return JSON.parse(raw!) as T[];
 }
+
+/**
+ * Characterization (#53): matrix output for configs WITHOUT `ota` must stay
+ * byte-identical while OTA routing is reworked. Never update with `-u`.
+ */
+describe('matrix output for non-ota apps is byte-identical', () => {
+  const { ota: _ota, ...pawlogProductionNoOta } = pawlogConfig.build['production']!;
+  const pawlogNoOta: Config = { ...pawlogConfig, build: { production: pawlogProductionNoOta } };
+  const selfHostedNoOta: Config = {
+    ...pawlogNoOta,
+    project: { ...pawlogNoOta.project, bundleId: 'com.shipyard.nightly', packageName: 'com.shipyard.nightly' },
+    checks: { lint: true },
+    runners: { ios: ['self-hosted', 'macos-arm'] },
+    env: { SENTRY_DISABLE_AUTO_UPLOAD: 'true' },
+  };
+
+  test('bun, two apps (store all + firebase android)', () => {
+    const file = generateMatrixWorkflow(
+      [
+        { dir: 'apps/pawlog', slug: 'pawlog', config: pawlogNoOta },
+        { dir: 'apps/vaulty', slug: 'vaulty', config: vaultyConfig },
+      ],
+      { packageManager: 'bun' },
+    );
+    expect(file.content).toMatchSnapshot();
+  });
+
+  test('yarn default, self-hosted ios runner + root-level app', () => {
+    const file = generateMatrixWorkflow([
+      { dir: '', slug: 'nightly', config: selfHostedNoOta },
+      { dir: 'apps/vaulty', slug: 'vaulty', config: vaultyConfig },
+    ]);
+    expect(file.content).toMatchSnapshot();
+  });
+
+  test('npm, single android app without checks', () => {
+    const file = generateMatrixWorkflow([{ dir: 'apps/vaulty', slug: 'vaulty', config: vaultyConfig }], {
+      packageManager: 'npm',
+    });
+    expect(file.content).toMatchSnapshot();
+  });
+});
 
 describe('discoverConfigs', () => {
   function makeTree(): string {
@@ -177,13 +218,21 @@ describe('generateMatrixWorkflow', () => {
     expect(() => yaml.load(file.content)).not.toThrow();
   });
 
-  test('triggers on workflow_dispatch (optional app input) and tag push — never on push paths', () => {
-    const { parsed } = renderMatrix();
+  test('without ota: dispatch (optional app input) + tag push only — never on push', () => {
+    const { parsed } = renderMatrix([{ dir: 'apps/vaulty', slug: 'vaulty', config: vaultyConfig }]);
     expect(parsed.on.workflow_dispatch?.inputs?.['app']).toBeDefined();
     expect(parsed.on.workflow_dispatch?.inputs?.['app']?.required).toBe(false);
     expect(parsed.on.push?.tags).toEqual(['v*']);
     expect(parsed.on.push?.paths).toBeUndefined();
     expect(parsed.on.push?.branches).toBeUndefined();
+  });
+
+  test('with ota: also push-triggered on the ota profile branch (change detection in plan, no paths filter)', () => {
+    const { parsed } = renderMatrix();
+    expect(parsed.on.workflow_dispatch?.inputs?.['app']?.required).toBe(false);
+    expect(parsed.on.push?.tags).toEqual(['v*']);
+    expect(parsed.on.push?.branches).toEqual(['main']);
+    expect(parsed.on.push?.paths).toBeUndefined();
   });
 
   test('release matrix has one leg per app × profile × platform', () => {
@@ -225,69 +274,18 @@ describe('generateMatrixWorkflow', () => {
     expect(plain.ota).toBe(false);
   });
 
-  test('platform:all with ota marks exactly one leg per app×profile as the uploader — the android one', () => {
-    const { parsed } = renderMatrix();
+  test('ota legs are per platform — no universal-bundle uploader flag', () => {
+    const { file, parsed } = renderMatrix();
     const legs = legsFromEnv<ReleaseLeg>(parsed, 'RELEASE_LEGS');
     const pawlogLegs = legs.filter((l) => l.app === 'pawlog' && l.profile === 'production');
-    expect(pawlogLegs).toHaveLength(2);
-    const uploaders = pawlogLegs.filter((l) => l.otaUpload);
-    expect(uploaders).toHaveLength(1);
-    expect(uploaders[0]!.platform).toBe('android');
-    // every ota leg still carries the ota flag so fingerprint skip logic runs per platform
+    expect(pawlogLegs.map((l) => l.platform)).toEqual(['android', 'ios']);
     expect(pawlogLegs.every((l) => l.ota)).toBe(true);
+    expect(legs.every((l) => !('otaUpload' in l))).toBe(true);
+    expect(file.content).not.toContain('--platform all');
   });
 
-  test('single-platform ota profile keeps the upload on its only leg', () => {
-    const iosOnlyOta: Config = {
-      project: { type: 'expo', bundleId: 'com.test.solo', packageName: 'com.test.solo' },
-      ci: 'github-actions',
-      build: {
-        production: {
-          platform: 'ios',
-          distribution: 'testflight',
-          ota: { server: 'https://ota.solo.dev', channel: 'production' },
-        },
-      },
-    };
-    const { parsed } = renderMatrix([{ dir: '', slug: 'solo', config: iosOnlyOta }]);
-    const legs = legsFromEnv<ReleaseLeg>(parsed, 'RELEASE_LEGS');
-    expect(legs).toHaveLength(1);
-    expect(legs[0]!.platform).toBe('ios');
-    expect(legs[0]!.ota).toBe(true);
-    expect(legs[0]!.otaUpload).toBe(true);
-  });
-
-  test('non-ota legs never carry the upload flag', () => {
-    const { parsed } = renderMatrix();
-    const legs = legsFromEnv<ReleaseLeg>(parsed, 'RELEASE_LEGS');
-    const plain = legs.find((l) => l.app === 'vaulty')!;
-    expect(plain.ota).toBe(false);
-    expect(plain.otaUpload).toBe(false);
-  });
-
-  test('OTA export/package/upload steps gate on matrix.otaUpload; fingerprint steps keep matrix.ota', () => {
-    const { parsed } = renderMatrix();
-    const release = parsed.jobs['release']!;
-    const gated = ['Export JS bundle (OTA)', 'Package bundle (OTA)', 'Upload OTA update'];
-    for (const name of gated) {
-      const step = release.steps.find((s) => s.name === name);
-      expect(step).toBeDefined();
-      expect(String(step!.if)).toContain('matrix.otaUpload');
-    }
-    const cache = release.steps.find((s) => s.id === 'fp-cache')!;
-    expect(String(cache.if)).toContain('matrix.ota');
-    expect(String(cache.if)).not.toContain('matrix.otaUpload');
-  });
-
-  test('release job does not duplicate expo prebuild / pod install — fastlane prebuild lane owns it', () => {
-    const { file, parsed } = renderMatrix();
-    const release = parsed.jobs['release']!;
-    const prebuildStep = release.steps.find((s) => s.name === 'Expo Prebuild (iOS)');
-    const podStep = release.steps.find((s) => s.name === 'Install Pods');
-    const androidPrebuildStep = release.steps.find((s) => s.name === 'Expo Prebuild (Android)');
-    expect(prebuildStep).toBeUndefined();
-    expect(podStep).toBeUndefined();
-    expect(androidPrebuildStep).toBeUndefined();
+  test('release jobs do not duplicate expo prebuild / pod install — fastlane prebuild lane owns it', () => {
+    const { file } = renderMatrix();
     expect(file.content).not.toContain('expo prebuild');
     expect(file.content).not.toContain('pod install');
   });
@@ -308,53 +306,58 @@ describe('generateMatrixWorkflow', () => {
     const plan = parsed.jobs['plan']!;
     const script = plan.steps.map((s) => s.run ?? '').join('\n');
     expect(script).toContain('select(.app == $app)');
-    expect(plan.outputs?.['release']).toContain('steps.plan.outputs.release');
-    expect(plan.outputs?.['quality']).toContain('steps.plan.outputs.quality');
+    expect(plan.outputs?.['ota']).toContain('steps.route.outputs.ota');
+    expect(plan.outputs?.['native']).toContain('steps.route.outputs.native');
+    expect(plan.outputs?.['quality']).toContain('steps.select.outputs.quality');
   });
 
-  test('quality and release jobs consume the plan matrix via fromJSON', () => {
+  test('quality, ota and native jobs consume the plan matrices via fromJSON', () => {
     const { parsed } = renderMatrix();
     expect(parsed.jobs['quality']!.strategy?.matrix?.include).toBe(
       '${{ fromJSON(needs.plan.outputs.quality) }}',
     );
-    expect(parsed.jobs['release']!.strategy?.matrix?.include).toBe(
-      '${{ fromJSON(needs.plan.outputs.release) }}',
+    expect(parsed.jobs['ota']!.strategy?.matrix?.include).toBe('${{ fromJSON(needs.plan.outputs.ota) }}');
+    expect(parsed.jobs['native']!.strategy?.matrix?.include).toBe(
+      '${{ fromJSON(needs.plan.outputs.native) }}',
     );
   });
 
   test('matrix legs run with a per-app working-directory', () => {
     const { parsed } = renderMatrix();
-    expect(parsed.jobs['quality']!.defaults?.run?.['working-directory']).toBe('${{ matrix.dir }}');
-    expect(parsed.jobs['release']!.defaults?.run?.['working-directory']).toBe('${{ matrix.dir }}');
+    for (const id of ['quality', 'ota', 'native']) {
+      expect(parsed.jobs[id]!.defaults?.run?.['working-directory']).toBe('${{ matrix.dir }}');
+    }
   });
 
-  test('release job runs on the per-leg runner and needs plan + quality', () => {
+  test('ota and native jobs run on the per-leg runner and need plan + quality', () => {
     const { parsed } = renderMatrix();
-    const release = parsed.jobs['release']!;
-    expect(release['runs-on']).toBe('${{ matrix.runsOn }}');
-    expect(release.needs).toEqual(['plan', 'quality']);
+    for (const id of ['ota', 'native']) {
+      expect(parsed.jobs[id]!['runs-on']).toBe('${{ matrix.runsOn }}');
+      expect(parsed.jobs[id]!.needs).toEqual(['plan', 'quality']);
+    }
   });
 
-  test('release job reuses smart-OTA steps gated per leg', () => {
+  test('ota job reuses the smart-workflow package + upload partials (env-only, per-leg values)', () => {
     const { file, parsed } = renderMatrix();
-    const release = parsed.jobs['release']!;
-    const fp = release.steps.find((s) => s.id === 'fp');
-    const cache = release.steps.find((s) => s.id === 'fp-cache');
-    expect(fp).toBeDefined();
-    expect(cache).toBeDefined();
-    expect(String(cache!.if)).toContain('matrix.ota');
-    expect(file.content).toContain('@expo/fingerprint');
-    expect(file.content).toContain('${{ matrix.otaServer }}/api/upload');
-    expect(file.content).toContain('channel=${{ matrix.otaChannel }}');
+    const ota = parsed.jobs['ota']!;
+    const upload = ota.steps.find((s) => s.id === 'upload')!;
+    expect(upload.env?.['RNW_OTA_SERVER']).toBe('${{ matrix.otaServer }}');
+    expect(upload.env?.['RNW_CHANNEL']).toBe('${{ matrix.otaChannel }}');
+    expect(upload.run).toContain('--form-string "runtimeVersion=$RNW_HASH"');
+    expect(ota.steps.find((s) => s.id === 'update-id')).toBeDefined();
+    expect(file.content).not.toContain('@expo/fingerprint');
+    expect(file.content).not.toContain('fingerprint-${{');
   });
 
   test('fastlane step runs the per-leg lane with the union of required secrets', () => {
     const { parsed } = renderMatrix();
-    const release = parsed.jobs['release']!;
-    const fastlane = release.steps.find((s) => s.run?.includes('bundle exec fastlane'));
+    const native = parsed.jobs['native']!;
+    const fastlane = native.steps.find((s) => s.run?.includes('bundle exec fastlane'));
     expect(fastlane).toBeDefined();
-    expect(fastlane!.run).toContain('${{ matrix.platform }} ${{ matrix.profile }}');
+    expect(fastlane!.run).toBe('bundle exec fastlane "$RNW_PLATFORM" "$RNW_PROFILE"');
     const env = fastlane!.env ?? {};
+    expect(env['RNW_PLATFORM']).toBe('${{ matrix.platform }}');
+    expect(env['RNW_PROFILE']).toBe('${{ matrix.profile }}');
     // union across pawlog (store, ios+android) and vaulty (firebase, android)
     expect(env['PLAY_STORE_JSON_KEY']).toBe('${{ secrets.PLAY_STORE_JSON_KEY }}');
     expect(env['FIREBASE_APP_ID_ANDROID']).toBe('${{ secrets.FIREBASE_APP_ID_ANDROID }}');

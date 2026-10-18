@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import yaml from 'js-yaml';
 import { MATRIX_WORKFLOW_FILENAME } from '../src/generators/github-matrix';
 
 /**
@@ -125,5 +126,85 @@ describe('generate --matrix workflowsDir resolution (CLI)', () => {
         rmSync(root, { recursive: true, force: true });
       }
     });
+  });
+});
+
+/** #53: OTA-mode matrix — per-app Xcode scheme + git-root workflow path. */
+describe('generate --matrix with ota apps (CLI)', () => {
+  const cli = resolve(import.meta.dir, '..', 'src', 'index.ts');
+
+  const otaYaml = (bundleId: string): string =>
+    [
+      'project:',
+      '  type: expo',
+      `  bundleId: ${bundleId}`,
+      `  packageName: ${bundleId}`,
+      'ci: github-actions',
+      'build:',
+      '  production:',
+      '    platform: ios',
+      '    distribution: testflight',
+      '    ota:',
+      '      server: http://localhost:3000',
+      '      channel: production',
+      '    e2e:',
+      '      maestro:',
+      '        flows: .maestro',
+      '',
+    ].join('\n');
+
+  function makeOtaMonorepo(): string {
+    const root = mkdtempSync(join(tmpdir(), 'rnwf-matrix-ota-cli-'));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    for (const [app, name] of [['petcare', 'Pet Care'], ['sleep', undefined]] as const) {
+      mkdirSync(join(root, 'apps', app), { recursive: true });
+      writeFileSync(join(root, 'apps', app, 'rn-workflows.yml'), otaYaml(`com.shipyard.${app}`));
+      if (name) writeFileSync(join(root, 'apps', app, 'app.json'), JSON.stringify({ expo: { name } }));
+    }
+    return root;
+  }
+
+  interface Leg {
+    app: string;
+    scheme: string;
+    paths: string[];
+  }
+
+  function readLegs(file: string): Leg[] {
+    const parsed = yaml.load(readFileSync(file, 'utf8')) as { jobs: { plan: { env: { RELEASE_LEGS: string } } } };
+    return JSON.parse(parsed.jobs.plan.env.RELEASE_LEGS) as Leg[];
+  }
+
+  test('each leg carries its own detected scheme (bundle-id fallback when undetectable)', () => {
+    const root = makeOtaMonorepo();
+    try {
+      execFileSync('bun', [cli, 'generate', '--matrix', '--cwd', join(root, 'apps', 'sleep')], { stdio: 'pipe' });
+      const legs = readLegs(join(root, '.github', 'workflows', MATRIX_WORKFLOW_FILENAME));
+      expect(legs.map((l) => `${l.app}:${l.scheme}`)).toEqual(['petcare:PetCare', 'sleep:sleep']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('workflow lands at the git root; legs watch its root-relative path', () => {
+    const root = makeOtaMonorepo();
+    try {
+      execFileSync('bun', [cli, 'generate', '--matrix', '--cwd', join(root, 'apps', 'petcare')], { stdio: 'pipe' });
+      const legs = readLegs(join(root, '.github', 'workflows', MATRIX_WORKFLOW_FILENAME));
+      expect(legs[0]!.paths).toEqual(['apps/petcare/', `.github/workflows/${MATRIX_WORKFLOW_FILENAME}`]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('--workflows-dir is reflected in the watched workflow path', () => {
+    const root = makeOtaMonorepo();
+    try {
+      execFileSync('bun', [cli, 'generate', '--matrix', '--cwd', root, '--workflows-dir', 'ci/wf'], { stdio: 'pipe' });
+      const legs = readLegs(join(root, 'ci', 'wf', MATRIX_WORKFLOW_FILENAME));
+      expect(legs[0]!.paths).toEqual(['apps/petcare/', `ci/wf/${MATRIX_WORKFLOW_FILENAME}`]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

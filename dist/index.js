@@ -330,6 +330,52 @@ function readName(parsed) {
     return top.trim();
   return;
 }
+function asRecord(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v) ? v : undefined;
+}
+function str(v) {
+  return typeof v === "string" ? v : undefined;
+}
+function hasExpoUpdatesDep(appDir) {
+  try {
+    const pkg = asRecord(JSON.parse(readFileSync(resolve(appDir, "package.json"), "utf8")));
+    return ["dependencies", "devDependencies"].some((k) => asRecord(pkg?.[k])?.["expo-updates"] !== undefined);
+  } catch {
+    return false;
+  }
+}
+function readExpoUpdatesConfig(appDir) {
+  for (const file of APP_CONFIG_FILES) {
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync(resolve(appDir, file), "utf8"));
+    } catch {
+      continue;
+    }
+    const root = asRecord(parsed);
+    const expo = asRecord(root?.["expo"]) ?? root;
+    if (!expo)
+      continue;
+    const runtime = expo["runtimeVersion"];
+    const updates = asRecord(expo["updates"]);
+    const headers = asRecord(updates?.["requestHeaders"]);
+    return {
+      kind: "static",
+      runtimePolicy: str(asRecord(runtime)?.["policy"]),
+      updatesUrl: str(updates?.["url"]),
+      channel: str(headers?.["expo-channel-name"]),
+      codeSigning: updates?.["codeSigningCertificate"] !== undefined,
+      hasExpoUpdates: hasExpoUpdatesDep(appDir)
+    };
+  }
+  for (const f of ["app.config.js", "app.config.ts", "app.config.mjs", "app.config.cjs"]) {
+    try {
+      readFileSync(resolve(appDir, f));
+      return { kind: "dynamic" };
+    } catch {}
+  }
+  return { kind: "none" };
+}
 
 // src/commands/init.ts
 var BUILD_PROFILE_NAMES = ["preview", "staging", "production"];
@@ -1199,6 +1245,81 @@ function resolveMatrixWorkflowsDir(input) {
   };
 }
 
+// src/utils/ota-setup.ts
+var LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
+function hostOf(url) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return;
+  }
+}
+function checkOtaReadiness(appDir, profileName, profile) {
+  const ota = profile.ota;
+  if (!ota)
+    return [];
+  const findings = [];
+  const warn = (message) => void findings.push({ level: "warn", message });
+  const note = (message) => void findings.push({ level: "note", message });
+  const cfg = readExpoUpdatesConfig(appDir);
+  if (cfg.kind === "dynamic") {
+    warn(`Profile "${profileName}": the Expo config is dynamic (app.config.js/ts) and cannot be checked — make sure runtimeVersion is { policy: "fingerprint" }, updates.url points at ${ota.server} and updates.requestHeaders["expo-channel-name"] is "${ota.channel}".`);
+  } else if (cfg.kind === "static") {
+    if (!cfg.hasExpoUpdates) {
+      warn(`Profile "${profileName}": expo-updates is not in package.json dependencies — install it (npx expo install expo-updates).`);
+    }
+    if (cfg.runtimePolicy !== "fingerprint") {
+      warn(`Profile "${profileName}": runtimeVersion must be { "policy": "fingerprint" } in the Expo config so native changes are detected.`);
+    }
+    const expectedHost = hostOf(ota.server);
+    const actualHost = cfg.updatesUrl ? hostOf(cfg.updatesUrl) : undefined;
+    if (!cfg.updatesUrl || actualHost !== expectedHost) {
+      warn(`Profile "${profileName}": updates.url (${cfg.updatesUrl ?? "unset"}) does not point at ota.server (${ota.server}); expected ${ota.server.replace(/\/+$/, "")}/api/manifest.`);
+    }
+    if (cfg.channel !== ota.channel) {
+      warn(`Profile "${profileName}": updates.requestHeaders["expo-channel-name"] is ${cfg.channel === undefined ? "unset" : `"${cfg.channel}"`} but ota.channel is "${ota.channel}".`);
+    }
+    if (!cfg.codeSigning) {
+      note(`Profile "${profileName}": consider updates.codeSigningCertificate + codeSigningMetadata in the Expo config and setting the OTA server's signing key.`);
+    }
+  }
+  if (!profile.e2e) {
+    note(`Profile "${profileName}": OTA updates ship untested — add an e2e (Maestro) block to run flows against the staging channel before promotion.`);
+  } else if (e2ePlatforms(profile).includes("android")) {
+    const host = hostOf(ota.server)?.replace(/:\d+$/, "");
+    if (host && LOCAL_HOSTS.has(host)) {
+      warn(`Profile "${profileName}": Android e2e runs on an emulator where localhost is the emulator itself, but ota.server is ${ota.server} — use a reachable hostname.`);
+    }
+  }
+  return findings;
+}
+var GUIDANCE = [
+  "- Self-hosted runners need `jq`, `curl` and `git`. macOS self-hosted iOS e2e needs Xcode + `simctl`; Maestro is optional (the generated workflow installs a pinned Maestro if absent).",
+  "- Render `Updates.updateId` in an element with testID `rnw-update-id` (hidden/debug-only is fine). A generated Maestro pre-flow asserts it equals the staging update id before your flows run.",
+  "- Code signing for updates: set `updates.codeSigningCertificate` + `codeSigningMetadata` in the Expo config and the signing key on the OTA server.",
+  "- The first run after upgrading from 0.2.x rebuilds natively once per platform (no legacy cache fallback).",
+  "- Native tags `rnw/native/...` need the workflow's `contents: write` permission on native jobs and must not be blocked by tag rulesets."
+];
+function buildOtaSetupSection(profiles) {
+  const withOta = profiles.filter((p2) => p2.profile.ota);
+  if (withOta.length === 0)
+    return "";
+  const lines = ["## OTA updates", "", ...GUIDANCE, ""];
+  const reported = withOta.filter((p2) => p2.findings.length > 0);
+  if (reported.length > 0) {
+    lines.push("### Readiness checks", "");
+    for (const r of reported) {
+      const label = r.app ? `${r.app}/${r.name}` : r.name;
+      lines.push(`**${label}**`, "");
+      for (const f of r.findings)
+        lines.push(`- ${f.level === "warn" ? "Warning" : "Note"}: ${f.message}`);
+      lines.push("");
+    }
+  }
+  return lines.join(`
+`);
+}
+
 // src/utils/secrets.ts
 var OPTIONAL_SECRETS = new Set(["ASC_KEY_IS_BASE64"]);
 var SECRET_DESCRIPTIONS = {
@@ -1248,7 +1369,7 @@ function requiredOnly(secrets) {
   return secrets.filter((s) => !s.optional);
 }
 var SETUP_MD_GENERATED_MARKER = "<!-- rn-workflows:generated -->";
-function buildSetupMarkdown(secrets, ci) {
+function buildSetupMarkdown(secrets, ci, extraSections = []) {
   const lines = [
     SETUP_MD_GENERATED_MARKER,
     "# CI secrets setup",
@@ -1262,6 +1383,10 @@ function buildSetupMarkdown(secrets, ci) {
   ];
   for (const req of secrets) {
     lines.push(`## ${req.name}${req.optional ? " (optional)" : ""}`, "", req.description, "", "```sh", `${secretSetCommand(ci, req.name)} "<value>"`, "```", "");
+  }
+  for (const section of extraSections) {
+    if (section)
+      lines.push(section);
   }
   return lines.join(`
 `);
@@ -1372,13 +1497,18 @@ function runMatrix(args) {
     workflowsPathFromRoot: toPosixRelative(gitRoot, workflowsDir)
   });
   const requiredSecrets = dedupeSecretsByName(apps.flatMap((app) => deriveRequiredSecrets(app.config)));
+  const otaReports = apps.flatMap((app) => collectOtaReadiness(app.config, join3(gitRoot, app.dir), app.dir));
+  logOtaFindings(otaReports);
   const files = [file];
   if (requiredSecrets.length > 0) {
     const { path: setupMdPath, redirected } = resolveMatrixSetupMdPath(gitRoot);
     if (redirected) {
       p2.log.warn(`SETUP.md already exists at ${gitRoot} and wasn't generated by rn-workflows — writing ${setupMdPath} instead.`);
     }
-    files.push({ path: setupMdPath, content: buildSetupMarkdown(requiredSecrets, "github-actions") });
+    files.push({
+      path: setupMdPath,
+      content: buildSetupMarkdown(requiredSecrets, "github-actions", [buildOtaSetupSection(otaReports)])
+    });
   }
   writeFiles(files, {
     outDir: gitRoot,
@@ -1395,6 +1525,25 @@ function resolveMatrixSetupMdPath(gitRoot) {
   if (firstLine === SETUP_MD_GENERATED_MARKER)
     return { path: "SETUP.md", redirected: false };
   return { path: "rn-workflows.SETUP.md", redirected: true };
+}
+function collectOtaReadiness(config, appDir, app) {
+  return Object.entries(config.build).filter(([, profile]) => profile.ota).map(([name, profile]) => ({
+    ...app ? { app } : {},
+    name,
+    profile,
+    findings: checkOtaReadiness(appDir, name, profile)
+  }));
+}
+function logOtaFindings(reports) {
+  for (const r of reports) {
+    for (const f of r.findings) {
+      const text2 = r.app ? `${r.app}: ${f.message}` : f.message;
+      if (f.level === "warn")
+        p2.log.warn(text2);
+      else
+        p2.log.info(text2);
+    }
+  }
 }
 function dedupeSecretsByName(secrets) {
   const byName = new Map;
@@ -1493,10 +1642,12 @@ var generate_default = defineCommand2({
       ...gitRoot ? { workflowsPathFromRoot: toPosixRelative(gitRoot, workflowsDir) } : {}
     };
     const requiredSecrets = deriveRequiredSecrets(config);
+    const otaReports = collectOtaReadiness(config, appDirAbs);
+    logOtaFindings(otaReports);
     const files = [
       ...generateFastlane(config, { packageManager, scheme: detectedScheme }),
       ...config.ci === "github-actions" ? generateGithubActions(config, githubOptions) : generateGitlab(config),
-      ...requiredSecrets.length > 0 ? [{ path: "SETUP.md", content: buildSetupMarkdown(requiredSecrets, config.ci) }] : []
+      ...requiredSecrets.length > 0 ? [{ path: "SETUP.md", content: buildSetupMarkdown(requiredSecrets, config.ci, [buildOtaSetupSection(otaReports)]) }] : []
     ];
     writeFiles(files, {
       outDir: String(args.cwd),

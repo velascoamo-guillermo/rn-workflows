@@ -1,0 +1,1 @@
+{"expo":{"name":"Ready","slug":"ready","runtimeVersion":{"policy":"fingerprint"},"updates":{"url":"https://ota.example.com/api/manifest","requestHeaders":{"expo-channel-name":"staging"}},"ios":{"bundleIdentifier":"com.example.ready"},"android":{"package":"com.example.ready"}}}

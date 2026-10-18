@@ -120,7 +120,11 @@ export function requiredOnly(secrets: SecretRequirement[]): SecretRequirement[] 
  */
 export const SETUP_MD_GENERATED_MARKER = '<!-- rn-workflows:generated -->';
 
-export function buildSetupMarkdown(secrets: SecretRequirement[], ci: CiProvider): string {
+export function buildSetupMarkdown(
+  secrets: SecretRequirement[],
+  ci: CiProvider,
+  extraSections: string[] = [],
+): string {
   const lines: string[] = [
     SETUP_MD_GENERATED_MARKER,
     '# CI secrets setup',
@@ -135,6 +139,10 @@ export function buildSetupMarkdown(secrets: SecretRequirement[], ci: CiProvider)
 
   for (const req of secrets) {
     lines.push(`## ${req.name}${req.optional ? ' (optional)' : ''}`, '', req.description, '', '```sh', `${secretSetCommand(ci, req.name)} "<value>"`, '```', '');
+  }
+
+  for (const section of extraSections) {
+    if (section) lines.push(section);
   }
 
   return lines.join('\n');

@@ -1,0 +1,91 @@
+<%#
+  Android e2e test binary: assembleRelease APK (Expo's template signs release
+  with the debug keystore) whose expo-updates config points at the staging
+  channel, cached by runtimeVersion at $RUNNER_TEMP/rnw-e2e/android/app.apk.
+  The store binary is never patched: the manifest is restored right after.
+  Locals: e2e (view from github-actions.ts), expoCli, projectType, hashExpr.
+-%>
+      - name: Restore e2e test binary (android)
+        id: e2e-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/rnw-e2e/android
+          key: <%- e2e.cacheKey %>
+
+<% if (projectType === 'expo') { -%>
+      - name: Prebuild native project for e2e (android)
+        id: e2e-prebuild
+        if: steps.e2e-cache.outputs.cache-hit != 'true'
+        env:
+          RNW_PLATFORM: android
+        run: <%- expoCli %> prebuild --platform "$RNW_PLATFORM" --clean
+
+<% } -%>
+      - name: Point test binary at the staging channel (android)
+        id: e2e-patch
+        if: steps.e2e-cache.outputs.cache-hit != 'true'
+        env:
+          RNW_STAGING_CHANNEL: <%- e2e.stagingChannel %>
+        run: |
+          set -euo pipefail
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          mkdir -p "$RUNNER_TEMP/rnw-e2e-orig"
+          cp "$MANIFEST" "$RUNNER_TEMP/rnw-e2e-orig/AndroidManifest.xml"
+          cat > "$RUNNER_TEMP/rnw-patch-manifest.js" <<'JS'
+          const fs = require("fs");
+          const file = process.argv[2];
+          let xml = fs.readFileSync(file, "utf8");
+          function setMeta(name, value) {
+            const tag = '<meta-data android:name="' + name + '" android:value="' + value + '"/>';
+            const re = new RegExp('<meta-data\\b[^>]*android:name="' + name.replace(/\./g, "\\.") + '"[^>]*/>');
+            if (re.test(xml)) xml = xml.replace(re, tag);
+            else if (xml.includes("</application>")) xml = xml.replace("</application>", "  " + tag + "\n    </application>");
+            else throw new Error("no <application> element in " + file);
+          }
+          const headers = JSON.stringify({ "expo-channel-name": process.env.RNW_STAGING_CHANNEL }).replace(/"/g, "&quot;");
+          setMeta("expo.modules.updates.UPDATES_CONFIGURATION_REQUEST_HEADERS_KEY", headers);
+          setMeta("expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS", "30000");
+          fs.writeFileSync(file, xml);
+          JS
+          node "$RUNNER_TEMP/rnw-patch-manifest.js" "$MANIFEST"
+
+<% if (setupJava) { -%>
+      - name: Setup JDK
+        if: steps.e2e-cache.outputs.cache-hit != 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+<% } -%>
+      - name: Build e2e test binary (android release apk)
+        id: e2e-build
+        if: steps.e2e-cache.outputs.cache-hit != 'true'
+        env:
+          EXPO_UPDATES_FINGERPRINT_OVERRIDE: <%- hashExpr %>
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"
+        run: |
+          set -euo pipefail
+          (cd android && ./gradlew assembleRelease)
+          OUT="$RUNNER_TEMP/rnw-e2e/android"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          cp android/app/build/outputs/apk/release/app-release.apk "$OUT/app.apk"
+
+      - name: Save e2e test binary (android)
+        id: e2e-save
+        if: steps.e2e-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/rnw-e2e/android
+          key: <%- e2e.cacheKey %>
+
+      - name: Restore native project after the test build (android)
+        id: e2e-unpatch
+        if: steps.e2e-cache.outputs.cache-hit != 'true'
+<% if (projectType === 'expo') { -%>
+        run: cp "$RUNNER_TEMP/rnw-e2e-orig/AndroidManifest.xml" android/app/src/main/AndroidManifest.xml
+<% } else { -%>
+        run: git checkout -- android
+<% } -%>
+

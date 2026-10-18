@@ -1,0 +1,20 @@
+<%#
+  Pinned, conditional Maestro install: reuse a maestro already on PATH or in
+  ~/.maestro (self-hosted runners), else the official installer pinned via
+  MAESTRO_VERSION. Locals: maestroVersion.
+-%>
+      - name: Install Maestro
+        id: maestro-install
+        env:
+          MAESTRO_VERSION: <%- maestroVersion %>
+        run: |
+          set -euo pipefail
+          if command -v maestro > /dev/null 2>&1; then
+            echo "Maestro already installed: $(command -v maestro)"
+          elif [ -x "$HOME/.maestro/bin/maestro" ]; then
+            echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+          else
+            curl -fsSL "https://get.maestro.mobile.dev" | bash
+            echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+          fi
+

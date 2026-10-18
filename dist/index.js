@@ -122,6 +122,12 @@ function resolveAndroidTrack(p) {
 function resolveStagingChannel(o) {
   return o.stagingChannel ?? "staging";
 }
+function e2ePlatforms(p) {
+  const declared = p.e2e?.maestro.platforms;
+  if (declared !== undefined)
+    return [...declared];
+  return E2E_PLATFORMS.filter((x) => p.platform === "all" || p.platform === x);
+}
 var MatchConfigSchema = z.object({
   gitUrl: z.string().min(1, "match.gitUrl cannot be empty").regex(SINGLE_LINE_PATTERN, `match.gitUrl ${SINGLE_LINE_MESSAGE}`),
   storageMode: z.literal("git").optional()
@@ -765,8 +771,13 @@ function nativeTagPrefix({ appSlug, profile, platform }) {
 function legConcurrencyGroup({ appSlug, profile, platform }) {
   return ["rnw", ...appSlug ? [appSlug] : [], profile, platform].join("-");
 }
+function e2eCacheKey(leg, hash) {
+  return ["rnw", "e2e", ...leg.appSlug ? [leg.appSlug] : [], leg.profile, leg.platform, hash].join("-");
+}
 
 // src/generators/github-actions.ts
+var MAESTRO_VERSION = "2.11.0";
+var EMULATOR_RUNNER_VERSION = "v2.38.0";
 var DEFAULT_BRANCH = {
   preview: "develop",
   staging: "staging",
@@ -789,6 +800,7 @@ function generateGithubActions(config, options = {}) {
   const slugPrefix = options.appSlug ? `${options.appSlug}-` : "";
   const workflowsPathFromRoot = options.workflowsPathFromRoot ?? ".github/workflows";
   const extraPaths = config.extraPaths ?? [];
+  const scheme = resolveScheme(config, options.scheme);
   const files = [];
   for (const [name, profile] of Object.entries(config.build)) {
     const platforms = platformsFor(profile.platform);
@@ -796,8 +808,20 @@ function generateGithubActions(config, options = {}) {
       key,
       value: yamlScalar(value)
     }));
+    const e2eLegs = profile.ota && profile.e2e ? e2ePlatforms(profile) : [];
     const jobs = platforms.map((platform) => {
       const runsOn = runsOnFor(config, platform);
+      const leg = { appSlug: options.appSlug, profile: name, platform };
+      const hashExpr = `\${{ needs.fingerprint.outputs.${platform}_hash }}`;
+      const maestro = profile.e2e?.maestro;
+      const e2e = profile.ota && maestro && e2eLegs.includes(platform) ? {
+        cacheKey: yamlScalar(e2eCacheKey(leg, hashExpr)),
+        stagingChannel: yamlScalar(resolveStagingChannel(profile.ota)),
+        flows: yamlScalar(maestro.flows),
+        appId: yamlScalar(platform === "ios" ? config.project.bundleId : config.project.packageName ?? config.project.bundleId),
+        scheme: yamlScalar(scheme),
+        ...maestro.iosDevice ? { iosDevice: yamlScalar(maestro.iosDevice) } : {}
+      } : undefined;
       return {
         id: `build-${platform}`,
         name: `Build ${name} (${platform})`,
@@ -807,8 +831,10 @@ function generateGithubActions(config, options = {}) {
         selfHosted: isSelfHosted(runsOn),
         env: jobEnv,
         secrets: secretsFor(platform, profile.distribution),
-        tagPrefix: yamlScalar(nativeTagPrefix({ appSlug: options.appSlug, profile: name, platform })),
-        concurrencyGroup: yamlScalar(legConcurrencyGroup({ appSlug: options.appSlug, profile: name, platform }))
+        tagPrefix: yamlScalar(nativeTagPrefix(leg)),
+        concurrencyGroup: yamlScalar(legConcurrencyGroup(leg)),
+        hashExpr,
+        e2e
       };
     });
     const checks = config.checks ?? {};
@@ -831,7 +857,10 @@ function generateGithubActions(config, options = {}) {
       ...profile.ota ? {
         otaServer: yamlScalar(profile.ota.server),
         otaChannel: yamlScalar(profile.ota.channel),
-        expoCli: expoCliFor(packageManager)
+        expoCli: expoCliFor(packageManager),
+        projectType: config.project.type,
+        maestroVersion: MAESTRO_VERSION,
+        emulatorRunnerVersion: EMULATOR_RUNNER_VERSION
       } : {}
     });
     files.push({ path: `${workflowsDir}/${filename}`, content });
@@ -1320,6 +1349,7 @@ var generate_default = defineCommand2({
     const githubOptions = {
       packageManager,
       workflowsDir,
+      ...detectedScheme ? { scheme: detectedScheme } : {},
       ...appDir ? { appDir, appSlug: slugify(basename(appDirAbs)) } : {},
       ...gitRoot ? { workflowsPathFromRoot: toPosixRelative(gitRoot, workflowsDir) } : {}
     };

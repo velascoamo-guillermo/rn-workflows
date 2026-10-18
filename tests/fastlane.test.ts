@@ -439,3 +439,27 @@ describe('Ruby interpolation neutralization (#40 critical)', () => {
     }
   });
 });
+
+describe('Play upload track', () => {
+  const trackOf = (content: string): string | undefined =>
+    /upload_to_play_store\([\s\S]*?track: "([^"]+)"/.exec(content)?.[1];
+
+  it('defaults to internal when the profile has ota', () => {
+    expect(trackOf(fastfileFor('production-with-ota.yml'))).toBe('internal');
+  });
+
+  it('stays production without ota', () => {
+    expect(trackOf(fastfileFor('production-all.yml'))).toBe('production');
+  });
+
+  it('uses an explicit android.track over the ota default', () => {
+    const yml = fixture('production-with-ota.yml').replace(
+      '      buildType: aab',
+      '      buildType: aab\n      track: beta',
+    );
+    const content = generateFastlane(parseConfig(yml)).find(
+      (f) => f.path === 'fastlane/Fastfile',
+    )!.content;
+    expect(trackOf(content)).toBe('beta');
+  });
+});

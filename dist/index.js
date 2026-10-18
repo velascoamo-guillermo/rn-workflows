@@ -116,6 +116,9 @@ var BuildProfileSchema = z.object({
   ota: OtaConfigSchema.optional(),
   e2e: E2eConfigSchema.optional()
 });
+function resolveAndroidTrack(p) {
+  return p.android?.track ?? (p.ota !== undefined ? "internal" : "production");
+}
 function resolveStagingChannel(o) {
   return o.stagingChannel ?? "staging";
 }
@@ -661,7 +664,8 @@ function toAndroidView(name, profile) {
     targets,
     gradleTask: isAab ? "bundle" : "assemble",
     isAab,
-    androidArtifactPath: artifactPath
+    androidArtifactPath: artifactPath,
+    track: resolveAndroidTrack(profile)
   };
 }
 function toIosView(name, profile, bundleId, scheme) {

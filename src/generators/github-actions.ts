@@ -2,7 +2,9 @@ import { e2ePlatforms, resolveStagingChannel, type Config } from '../config/sche
 import { renderTemplate, yamlScalar } from '../utils/render.ts';
 import { platformsFor, secretsFor } from '../secrets.ts';
 import {
+  branchFor,
   e2eCacheKey,
+  expoCliFor,
   isSelfHosted,
   legConcurrencyGroup,
   nativeTagPrefix,
@@ -24,23 +26,6 @@ interface E2eView {
   appId: string;
   scheme: string;
   iosDevice?: string;
-}
-
-const DEFAULT_BRANCH: Record<string, string> = {
-  preview: 'develop',
-  staging: 'staging',
-  production: 'main',
-};
-
-function branchFor(profileName: string): string {
-  return DEFAULT_BRANCH[profileName] ?? 'main';
-}
-
-/** Command prefix for the Expo CLI under the project's package manager. */
-function expoCliFor(packageManager: 'yarn' | 'npm' | 'bun'): string {
-  if (packageManager === 'bun') return 'bunx expo';
-  if (packageManager === 'npm') return 'npx expo';
-  return 'yarn expo';
 }
 
 export interface GithubActionsOptions {

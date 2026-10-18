@@ -750,6 +750,28 @@ function generateFastlane(config, options = {}) {
 }
 
 // src/generators/github-shared.ts
+var DEFAULT_BRANCH = {
+  preview: "develop",
+  staging: "staging",
+  production: "main"
+};
+function branchFor(profileName) {
+  return DEFAULT_BRANCH[profileName] ?? "main";
+}
+function expoCliFor(packageManager) {
+  if (packageManager === "bun")
+    return "bunx expo";
+  if (packageManager === "npm")
+    return "npx expo";
+  return "yarn expo";
+}
+function installCommandFor(packageManager) {
+  if (packageManager === "bun")
+    return "bun install --frozen-lockfile";
+  if (packageManager === "npm")
+    return "npm ci";
+  return "yarn install --frozen-lockfile";
+}
 var DEFAULTS = {
   ios: "macos-latest",
   android: "ubuntu-latest"
@@ -778,21 +800,6 @@ function e2eCacheKey(leg, stagingChannel, hash) {
 // src/generators/github-actions.ts
 var MAESTRO_VERSION = "2.11.0";
 var EMULATOR_RUNNER_VERSION = "v2.38.0";
-var DEFAULT_BRANCH = {
-  preview: "develop",
-  staging: "staging",
-  production: "main"
-};
-function branchFor(profileName) {
-  return DEFAULT_BRANCH[profileName] ?? "main";
-}
-function expoCliFor(packageManager) {
-  if (packageManager === "bun")
-    return "bunx expo";
-  if (packageManager === "npm")
-    return "npx expo";
-  return "yarn expo";
-}
 function generateGithubActions(config, options = {}) {
   const packageManager = options.packageManager ?? "yarn";
   const workflowsDir = options.workflowsDir ?? ".github/workflows";
@@ -901,20 +908,16 @@ var MATRIX_WORKFLOW_FILENAME = "rn-release-matrix.yml";
 function legDir(dir) {
   return dir === "" ? "." : dir;
 }
-function generateMatrixWorkflow(apps, options = {}) {
-  if (apps.length === 0) {
-    throw new Error("generateMatrixWorkflow requires at least one app");
-  }
-  const packageManager = options.packageManager ?? "yarn";
-  const workflowsDir = options.workflowsDir ?? ".github/workflows";
-  const qualityLegs = [];
-  const releaseLegs = [];
-  const secretUnion = new Set;
-  let hasIos = false;
+function globPrefix(glob) {
+  const cut = glob.search(/[*?[{]/);
+  return cut === -1 ? glob : glob.slice(0, cut);
+}
+function qualityLegs(apps) {
+  const legs = [];
   for (const app of apps) {
     const checks = app.config.checks ?? {};
     if (checks.lint || checks.typecheck || checks.test) {
-      qualityLegs.push({
+      legs.push({
         app: app.slug,
         dir: legDir(app.dir),
         lint: checks.lint ?? false,
@@ -922,16 +925,40 @@ function generateMatrixWorkflow(apps, options = {}) {
         test: checks.test ?? false
       });
     }
+  }
+  return legs;
+}
+function secretUnion(apps) {
+  const set = new Set;
+  for (const app of apps) {
+    for (const profile of Object.values(app.config.build)) {
+      for (const platform of platformsFor(profile.platform)) {
+        for (const secret of secretsFor(platform, profile.distribution))
+          set.add(secret);
+      }
+    }
+  }
+  return [...set].sort();
+}
+function generateMatrixWorkflow(apps, options = {}) {
+  if (apps.length === 0) {
+    throw new Error("generateMatrixWorkflow requires at least one app");
+  }
+  const packageManager = options.packageManager ?? "yarn";
+  const workflowsDir = options.workflowsDir ?? ".github/workflows";
+  const path = `${workflowsDir}/${MATRIX_WORKFLOW_FILENAME}`;
+  const otaMode = apps.some((app) => Object.values(app.config.build).some((p2) => p2.ota !== undefined));
+  const content = otaMode ? renderOtaMode(apps, packageManager, options.workflowsPathFromRoot ?? ".github/workflows") : renderLegacy(apps, packageManager);
+  return { path, content };
+}
+function renderLegacy(apps, packageManager) {
+  const releaseLegs = [];
+  let hasIos = false;
+  for (const app of apps) {
     for (const [profileName, profile] of Object.entries(app.config.build)) {
-      const platforms = platformsFor(profile.platform);
-      const hasOtaProfile = profile.ota !== undefined;
-      const uploadPlatform = platforms.includes("android") ? "android" : platforms[0];
-      for (const platform of platforms) {
+      for (const platform of platformsFor(profile.platform)) {
         if (platform === "ios")
           hasIos = true;
-        for (const secret of secretsFor(platform, profile.distribution)) {
-          secretUnion.add(secret);
-        }
         const runsOn = runsOnFor(app.config, platform);
         releaseLegs.push({
           app: app.slug,
@@ -940,29 +967,97 @@ function generateMatrixWorkflow(apps, options = {}) {
           platform,
           runsOn,
           selfHosted: isSelfHosted(runsOn),
-          ota: hasOtaProfile,
-          otaUpload: hasOtaProfile && platform === uploadPlatform,
-          otaServer: profile.ota?.server ?? "",
-          otaChannel: profile.ota?.channel ?? ""
+          ota: false,
+          otaUpload: false,
+          otaServer: "",
+          otaChannel: ""
         });
       }
     }
   }
-  const secrets = [...secretUnion].sort();
-  const hasOta = releaseLegs.some((leg) => leg.ota);
+  const secrets = secretUnion(apps);
   const hasSelfHosted = releaseLegs.some((leg) => leg.selfHosted);
   const emittedLegs = hasSelfHosted ? releaseLegs : releaseLegs.map(({ selfHosted: _selfHosted, ...rest }) => rest);
-  const content = renderTemplate("github/workflow-matrix.ejs", {
+  const quality = qualityLegs(apps);
+  return renderTemplate("github/workflow-matrix.ejs", {
+    otaMode: false,
     packageManager,
-    qualityLegsJson: JSON.stringify(qualityLegs),
+    qualityLegsJson: JSON.stringify(quality),
     releaseLegsJson: JSON.stringify(emittedLegs),
-    hasQuality: qualityLegs.length > 0,
-    hasOta,
+    hasQuality: quality.length > 0,
     hasSelfHosted,
     secrets,
     matchAuth: hasIos && secrets.includes("MATCH_PASSWORD")
   });
-  return { path: `${workflowsDir}/${MATRIX_WORKFLOW_FILENAME}`, content };
+}
+function renderOtaMode(apps, packageManager, workflowsPathFromRoot) {
+  const selfPath = `${workflowsPathFromRoot}/${MATRIX_WORKFLOW_FILENAME}`;
+  const releaseLegs = [];
+  const otaBranches = new Set;
+  let usesMatch = false;
+  for (const app of apps) {
+    const scheme = resolveScheme(app.config, app.scheme);
+    const paths = [
+      app.dir === "" ? "" : `${app.dir}/`,
+      ...(app.config.extraPaths ?? []).filter((p2) => !p2.startsWith("!")).map(globPrefix),
+      selfPath
+    ];
+    const env = JSON.stringify(app.config.env ?? {});
+    for (const [profileName, profile] of Object.entries(app.config.build)) {
+      const branch = branchFor(profileName);
+      if (profile.ota)
+        otaBranches.add(branch);
+      const e2eFor = profile.ota && profile.e2e ? e2ePlatforms(profile) : [];
+      for (const platform of platformsFor(profile.platform)) {
+        const ref = { appSlug: app.slug, profile: profileName, platform };
+        const runsOn = runsOnFor(app.config, platform);
+        const stagingChannel = profile.ota ? resolveStagingChannel(profile.ota) : "";
+        const e2e = e2eFor.includes(platform);
+        if (platform === "ios" && secretsFor(platform, profile.distribution).includes("MATCH_PASSWORD")) {
+          usesMatch = true;
+        }
+        releaseLegs.push({
+          app: app.slug,
+          dir: legDir(app.dir),
+          profile: profileName,
+          platform,
+          runsOn,
+          selfHosted: isSelfHosted(runsOn),
+          ota: profile.ota !== undefined,
+          otaServer: profile.ota?.server ?? "",
+          otaChannel: profile.ota?.channel ?? "",
+          stagingChannel,
+          scheme,
+          e2e,
+          flows: e2e ? profile.e2e?.maestro.flows ?? "" : "",
+          iosDevice: e2e ? profile.e2e?.maestro.iosDevice ?? "" : "",
+          tagPrefix: nativeTagPrefix(ref),
+          group: legConcurrencyGroup(ref),
+          e2eCachePrefix: e2e ? e2eCacheKey(ref, stagingChannel, "") : "",
+          paths,
+          branch,
+          env
+        });
+      }
+    }
+  }
+  const quality = qualityLegs(apps);
+  return renderTemplate("github/workflow-matrix.ejs", {
+    otaMode: true,
+    packageManager,
+    qualityLegsJson: JSON.stringify(quality),
+    releaseLegsJson: JSON.stringify(releaseLegs),
+    hasQuality: quality.length > 0,
+    hasIos: releaseLegs.some((leg) => leg.platform === "ios"),
+    hasAndroid: releaseLegs.some((leg) => leg.platform === "android"),
+    hasSelfHosted: releaseLegs.some((leg) => leg.selfHosted),
+    branches: [...otaBranches].sort().map(yamlScalar),
+    secrets: secretUnion(apps),
+    matchAuth: usesMatch,
+    maxParallelOne: usesMatch,
+    expoCli: expoCliFor(packageManager),
+    installCommand: installCommandFor(packageManager)
+  });
 }
 
 // src/utils/fs.ts
@@ -1205,7 +1300,8 @@ function runMatrix(args) {
     }
     const appDirAbs = dirname3(configPath);
     const dir = toPosixRelative(gitRoot, appDirAbs);
-    apps.push({ dir, slug: slugify(basename(appDirAbs)), config });
+    const scheme = config.project.scheme === undefined && config.project.type === "expo" ? detectExpoScheme(appDirAbs) : undefined;
+    apps.push({ dir, slug: slugify(basename(appDirAbs)), config, ...scheme ? { scheme } : {} });
   }
   if (apps.length === 0) {
     p2.log.error("No github-actions configs discovered — nothing to generate.");
@@ -1231,7 +1327,11 @@ function runMatrix(args) {
     p2.log.warn(warning);
   const packageManager = detectPackageManager(gitRoot, ...apps.map((app) => join3(gitRoot, app.dir)));
   p2.log.info(`Matrix mode: ${apps.length} app(s) — ${apps.map((app) => app.slug).join(", ")}`);
-  const file = generateMatrixWorkflow(apps, { packageManager, workflowsDir });
+  const file = generateMatrixWorkflow(apps, {
+    packageManager,
+    workflowsDir,
+    workflowsPathFromRoot: toPosixRelative(gitRoot, workflowsDir)
+  });
   const requiredSecrets = dedupeSecretsByName(apps.flatMap((app) => deriveRequiredSecrets(app.config)));
   const files = [file];
   if (requiredSecrets.length > 0) {

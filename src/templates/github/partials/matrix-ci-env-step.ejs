@@ -1,0 +1,13 @@
+<%#
+  Export the leg's ci.env (JSON object string, schema-whitelisted keys and
+  values) to $GITHUB_ENV. Reads it via env, never `${{ }}` inside run.
+  Step id: ci-env.
+-%>
+      - name: Export ci.env
+        id: ci-env
+        env:
+          RNW_CI_ENV: ${{ matrix.env }}
+        run: |
+          set -euo pipefail
+          jq -r 'to_entries[] | "\(.key)=\(.value)"' <<< "$RNW_CI_ENV" >> "$GITHUB_ENV"
+

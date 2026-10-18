@@ -1,6 +1,31 @@
 import type { Config } from '../config/schema.ts';
 import { yamlScalar } from '../utils/render.ts';
 
+const DEFAULT_BRANCH: Record<string, string> = {
+  preview: 'develop',
+  staging: 'staging',
+  production: 'main',
+};
+
+/** Branch a build profile releases from (push trigger): preview→develop, staging→staging, else main. */
+export function branchFor(profileName: string): string {
+  return DEFAULT_BRANCH[profileName] ?? 'main';
+}
+
+/** Command prefix for the Expo CLI under the project's package manager. */
+export function expoCliFor(packageManager: 'yarn' | 'npm' | 'bun'): string {
+  if (packageManager === 'bun') return 'bunx expo';
+  if (packageManager === 'npm') return 'npx expo';
+  return 'yarn expo';
+}
+
+/** Frozen-lockfile JS dependency install for the project's package manager. */
+export function installCommandFor(packageManager: 'yarn' | 'npm' | 'bun'): string {
+  if (packageManager === 'bun') return 'bun install --frozen-lockfile';
+  if (packageManager === 'npm') return 'npm ci';
+  return 'yarn install --frozen-lockfile';
+}
+
 /** GitHub `runs-on` value: a single label or a label list. */
 export type RunsOn = string | string[];
 

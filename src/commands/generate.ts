@@ -118,7 +118,12 @@ function runMatrix(args: {
     }
     const appDirAbs = dirname(configPath);
     const dir = toPosixRelative(gitRoot, appDirAbs);
-    apps.push({ dir, slug: slugify(basename(appDirAbs)), config });
+    // Per-app Xcode scheme (e2e simulator build), as in single-app generate.
+    const scheme =
+      config.project.scheme === undefined && config.project.type === 'expo'
+        ? detectExpoScheme(appDirAbs)
+        : undefined;
+    apps.push({ dir, slug: slugify(basename(appDirAbs)), config, ...(scheme ? { scheme } : {}) });
   }
   if (apps.length === 0) {
     p.log.error('No github-actions configs discovered — nothing to generate.');
@@ -154,7 +159,11 @@ function runMatrix(args: {
   p.log.info(
     `Matrix mode: ${apps.length} app(s) — ${apps.map((app) => app.slug).join(', ')}`,
   );
-  const file = generateMatrixWorkflow(apps, { packageManager, workflowsDir });
+  const file = generateMatrixWorkflow(apps, {
+    packageManager,
+    workflowsDir,
+    workflowsPathFromRoot: toPosixRelative(gitRoot, workflowsDir),
+  });
 
   // Union of every discovered app's required secrets, deduped by name —
   // the matrix workflow is one file covering all of them, so its SETUP.md

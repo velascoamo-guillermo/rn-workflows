@@ -358,11 +358,7 @@ jobs:
 
 <%- include('partials/matrix-ci-env-step') -%>
 <%- include('partials/matrix-js-setup') -%>
-<%- include('partials/ota-package-steps', { platform: '${{ matrix.platform }}' }) -%>
-<%# RW-8 (#54): when matrix.e2e, upload to matrix.stagingChannel, restore/build the
-    e2e binary (partials/e2e-binary-*), run partials/maestro-* with the guard,
-    then promote — the upload below becomes the e2e-less branch. -%>
-<%- include('partials/ota-upload-step', { otaServer: '${{ matrix.otaServer }}', otaChannel: '${{ matrix.otaChannel }}', hashExpr: '${{ matrix.hash }}' }) -%>
+<%- include('partials/matrix-ota-ship-steps', { toolchain: true }) -%>
   native:
     name: Release ${{ matrix.app }} ${{ matrix.profile }} (${{ matrix.platform }})
     needs: [plan, quality]
@@ -430,8 +426,12 @@ jobs:
           java-version: 17
 
 <% } -%>
-<%# RW-8 (#54): when matrix.e2e, build a fresh e2e binary (partials/e2e-binary-*),
-    run partials/maestro-* without the guard and save it (partials/e2e-save-step). -%>
+<% for (const p of ['ios', 'android'].filter((x) => x === 'ios' ? hasIosE2e : hasAndroidE2e)) { -%>
+<% const legGate = joinIf(`matrix.platform == '${p}'`, 'matrix.e2e'); -%>
+<%- include(`partials/e2e-binary-${p}`, { idPrefix: `${p}-`, gate: legGate, hashExpr: '${{ matrix.hash }}', setupJava: false, restore: false }) -%>
+<%- include(`partials/maestro-${p}`, { idPrefix: `${p}-`, gate: legGate, guard: false, selfHosted: false, kvmIf: '!matrix.selfHosted' }) -%>
+<%- include('partials/e2e-save-step', { idPrefix: `${p}-`, gate: legGate, platform: p, restore: false }) -%>
+<% } -%>
 <%- include('partials/native-recheck-step', { ifExpr: '${{ matrix.ota }}', tagPrefix: '${{ matrix.tagPrefix }}', hashExpr: '${{ matrix.hash }}' }) -%>
       - name: Run Fastlane lane
         id: fastlane
@@ -451,4 +451,6 @@ jobs:
 <% } -%>
 
 <%- include('partials/native-tag-step', { ifExpr: "${{ matrix.ota && steps.recheck.outputs.exists != 'true' }}", tagPrefix: '${{ matrix.tagPrefix }}', hashExpr: '${{ matrix.hash }}' }) -%>
+
+<%- include('partials/matrix-ota-ship-steps', { toolchain: false, idPrefix: 'ota-', pkgPrefix: 'ota-', gate: "steps.recheck.outputs.exists == 'true'" }) -%>
 <% } -%>

@@ -642,9 +642,14 @@ function yamlScalar(value) {
 function yamlSingleQuoted(value) {
   return value.replace(/'/g, "''");
 }
+function joinIf(...conditions) {
+  const bare = conditions.filter((c) => typeof c === "string" && c !== "").map((c) => /^\$\{\{([\s\S]*)\}\}$/.exec(c.trim())?.[1]?.trim() ?? c);
+  const joined = bare.join(" && ");
+  return joined.startsWith("!") ? `\${{ ${joined} }}` : joined;
+}
 function renderTemplate(relPath, data) {
   const tpl = resolveTemplate(relPath);
-  const helpers = { rubyString, rubySymbol, yamlScalar, yamlSingleQuoted };
+  const helpers = { rubyString, rubySymbol, yamlScalar, yamlSingleQuoted, joinIf };
   return ejs.render(tpl.source, { ...helpers, ...data }, { rmWhitespace: false, filename: tpl.path });
 }
 
@@ -809,6 +814,7 @@ function e2eCacheKey(leg, stagingChannel, hash) {
 // src/generators/github-actions.ts
 var MAESTRO_VERSION = "2.11.0";
 var EMULATOR_RUNNER_VERSION = "v2.38.0";
+var PARTIAL_DEFAULTS = { idPrefix: "", pkgPrefix: "", gate: "", kvmIf: "" };
 function generateGithubActions(config, options = {}) {
   const packageManager = options.packageManager ?? "yarn";
   const workflowsDir = options.workflowsDir ?? ".github/workflows";
@@ -876,7 +882,8 @@ function generateGithubActions(config, options = {}) {
         expoCli: expoCliFor(packageManager),
         projectType: config.project.type,
         maestroVersion: MAESTRO_VERSION,
-        emulatorRunnerVersion: EMULATOR_RUNNER_VERSION
+        emulatorRunnerVersion: EMULATOR_RUNNER_VERSION,
+        ...PARTIAL_DEFAULTS
       } : {}
     });
     files.push({ path: `${workflowsDir}/${filename}`, content });
@@ -1004,6 +1011,7 @@ function renderOtaMode(apps, packageManager, workflowsPathFromRoot) {
   const releaseLegs = [];
   const otaBranches = new Set;
   let usesMatch = false;
+  const e2eProjectTypes = new Set;
   for (const app of apps) {
     const scheme = resolveScheme(app.config, app.scheme);
     const paths = [
@@ -1022,6 +1030,9 @@ function renderOtaMode(apps, packageManager, workflowsPathFromRoot) {
         const runsOn = runsOnFor(app.config, platform);
         const stagingChannel = profile.ota ? resolveStagingChannel(profile.ota) : "";
         const e2e = e2eFor.includes(platform);
+        if (e2e)
+          e2eProjectTypes.add(app.config.project.type);
+        const appId = platform === "ios" ? app.config.project.bundleId : app.config.project.packageName ?? app.config.project.bundleId;
         if (platform === "ios" && secretsFor(platform, profile.distribution).includes("MATCH_PASSWORD")) {
           usesMatch = true;
         }
@@ -1040,6 +1051,7 @@ function renderOtaMode(apps, packageManager, workflowsPathFromRoot) {
           e2e,
           flows: e2e ? profile.e2e?.maestro.flows ?? "" : "",
           iosDevice: e2e ? profile.e2e?.maestro.iosDevice ?? "" : "",
+          appId: e2e ? appId : "",
           tagPrefix: nativeTagPrefix(ref),
           group: legConcurrencyGroup(ref),
           e2eCachePrefix: e2e ? e2eCacheKey(ref, stagingChannel, "") : "",
@@ -1050,8 +1062,12 @@ function renderOtaMode(apps, packageManager, workflowsPathFromRoot) {
       }
     }
   }
+  if (e2eProjectTypes.size > 1) {
+    throw new Error("generate --matrix: e2e apps mix expo and bare projects; the matrix e2e steps support one project type per workflow");
+  }
   const quality = qualityLegs(apps);
   return renderTemplate("github/workflow-matrix.ejs", {
+    ...PARTIAL_DEFAULTS,
     otaMode: true,
     packageManager,
     qualityLegsJson: JSON.stringify(quality),
@@ -1065,7 +1081,21 @@ function renderOtaMode(apps, packageManager, workflowsPathFromRoot) {
     matchAuth: usesMatch,
     maxParallelOne: usesMatch,
     expoCli: expoCliFor(packageManager),
-    installCommand: installCommandFor(packageManager)
+    installCommand: installCommandFor(packageManager),
+    hasIosE2e: releaseLegs.some((leg) => leg.e2e && leg.platform === "ios"),
+    hasAndroidE2e: releaseLegs.some((leg) => leg.e2e && leg.platform === "android"),
+    projectType: [...e2eProjectTypes][0] ?? "expo",
+    maestroVersion: MAESTRO_VERSION,
+    emulatorRunnerVersion: EMULATOR_RUNNER_VERSION,
+    appDir: "${{ matrix.dir }}",
+    e2e: {
+      cacheKey: "${{ matrix.e2eCachePrefix }}${{ matrix.hash }}",
+      stagingChannel: "${{ matrix.stagingChannel }}",
+      flows: "${{ matrix.flows }}",
+      appId: "${{ matrix.appId }}",
+      scheme: "${{ matrix.scheme }}",
+      iosDevice: "${{ matrix.iosDevice }}"
+    }
   });
 }
 

@@ -29,11 +29,37 @@ end
 platform :android do
   desc "<%- rubyString(profile.description) %>"
   lane <%- rubySymbol(profile.name) %> do
+<% if (profile.bumpVersionCode) { -%>
+    # Native releases are automatic with ota: never reuse a versionCode Play
+    # already has. Highest code across the standard tracks (+ the target), +1.
+    play_tracks = ["<%= profile.track %>", "internal", "alpha", "beta", "production"].uniq
+    play_codes = play_tracks.flat_map do |t|
+      begin
+        google_play_track_version_codes(
+          track: t,
+          json_key_data: ENV["PLAY_STORE_JSON_KEY"],
+          package_name: "<%- rubyString(packageName) %>"
+        )
+      rescue StandardError => e
+        raise if t == "<%= profile.track %>"
+        UI.message("No version codes on track #{t}: #{e.message}")
+        []
+      end
+    end
+    next_version_code = (play_codes.map(&:to_i).max || 0) + 1
+    gradle(
+      task: "<%= profile.gradleTask %>",
+      build_type: "Release",
+      project_dir: "android/",
+      properties: { "android.injected.version.code" => next_version_code }
+    )
+<% } else { -%>
     gradle(
       task: "<%= profile.gradleTask %>",
       build_type: "Release",
       project_dir: "android/"
     )
+<% } -%>
 <% if (profile.targets.includes('firebase')) { -%>
     firebase_app_distribution(
       app: ENV["FIREBASE_APP_ID_ANDROID"],
@@ -64,6 +90,14 @@ platform :ios do
     prebuild
 <% } -%>
     match(type: "<%= profile.matchType %>", readonly: ENV.fetch("MATCH_READONLY", "true") == "true") if ENV["MATCH_PASSWORD"]
+<% if (profile.bumpBuildNumber) { -%>
+    # Native releases are automatic with ota: never reuse a build number
+    # TestFlight already has.
+    increment_build_number(
+      xcodeproj: "ios/<%- rubyString(profile.xcWorkspace) %>.xcodeproj",
+      build_number: latest_testflight_build_number(app_identifier: "<%- rubyString(bundleId) %>", api_key: lane_context[SharedValues::APP_STORE_CONNECT_API_KEY]) + 1
+    )
+<% } -%>
     build_app(
       workspace: "ios/<%- rubyString(profile.xcWorkspace) %>.xcworkspace",
       scheme: "<%- rubyString(profile.xcScheme) %>",

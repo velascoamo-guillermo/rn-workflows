@@ -734,13 +734,16 @@ function toAndroidView(name, profile) {
     gradleTask: isAab ? "bundle" : "assemble",
     isAab,
     androidArtifactPath: artifactPath,
-    track: resolveAndroidTrack(profile)
+    track: resolveAndroidTrack(profile),
+    bumpVersionCode: profile.ota !== undefined && targets.includes("store")
   };
 }
 function toIosView(name, profile, bundleId, scheme) {
   const exportMethod = profile.ios?.exportMethod ?? "app-store";
   const targets = profile.distribution.split("+").map((s) => s.trim());
   const matchType = matchTypeFor(exportMethod);
+  const hasOta = profile.ota !== undefined;
+  const wantsStore = targets.includes("store");
   return {
     name,
     description: `Build ${name} (ios)`,
@@ -750,7 +753,10 @@ function toIosView(name, profile, bundleId, scheme) {
     provisioningProfileName: provisioningProfileName(matchType, bundleId),
     codeSignIdentity: CODE_SIGN_IDENTITY[matchType],
     xcWorkspace: scheme,
-    xcScheme: scheme
+    xcScheme: scheme,
+    uploadToTestflight: targets.includes("testflight") || hasOta && wantsStore,
+    uploadToAppStore: wantsStore && !hasOta,
+    bumpBuildNumber: hasOta && (targets.includes("testflight") || wantsStore)
   };
 }
 function generateFastlane(config, options = {}) {

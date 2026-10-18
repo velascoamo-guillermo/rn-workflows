@@ -19,6 +19,8 @@ interface AndroidProfileView {
   isAab: boolean;
   androidArtifactPath: string;
   track: AndroidTrack;
+  /** With `ota`: query Play for the highest versionCode and build with +1. */
+  bumpVersionCode: boolean;
 }
 
 interface IosProfileView {
@@ -35,6 +37,8 @@ interface IosProfileView {
   uploadToTestflight: boolean;
   /** App Store submission. Never with `ota`: the native path stops at TestFlight. */
   uploadToAppStore: boolean;
+  /** With `ota`: set the build number to the latest TestFlight build + 1. */
+  bumpBuildNumber: boolean;
 }
 
 type MatchType = 'appstore' | 'adhoc' | 'development';
@@ -92,6 +96,7 @@ function toAndroidView(name: string, profile: BuildProfile): AndroidProfileView 
     isAab,
     androidArtifactPath: artifactPath,
     track: resolveAndroidTrack(profile),
+    bumpVersionCode: profile.ota !== undefined && targets.includes('store'),
   };
 }
 
@@ -118,6 +123,7 @@ function toIosView(
     xcScheme: scheme,
     uploadToTestflight: targets.includes('testflight') || (hasOta && wantsStore),
     uploadToAppStore: wantsStore && !hasOta,
+    bumpBuildNumber: hasOta && (targets.includes('testflight') || wantsStore),
   };
 }
 

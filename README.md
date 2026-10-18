@@ -102,7 +102,7 @@ project:
 
 ## OTA updates and Maestro e2e (GitHub Actions)
 
-Opt a build profile into a fingerprint-driven pipeline with `ota` (and optionally `e2e.maestro`). On push, each platform is routed independently: if a native release already exists for its fingerprint the change ships as an OTA update (uploaded to the staging channel, e2e-tested, then auto-promoted to the production channel); otherwise a native binary is built, e2e-tested, and uploaded to TestFlight / Play internal.
+Opt a build profile into a fingerprint-driven pipeline with `ota` (and optionally `e2e.maestro`). On push, each platform is routed independently: if a native release already exists for its fingerprint the change ships as an OTA update (uploaded to the staging channel, e2e-tested, then auto-promoted to the production channel); otherwise a native binary is built, e2e-tested, and uploaded to TestFlight / Play internal. Native lanes stop at the testing track (a `store` target uploads to TestFlight, not App Store review) and set their own build numbers: latest TestFlight build + 1 on iOS, highest Play versionCode + 1 on Android.
 
 ```yaml
 ci:

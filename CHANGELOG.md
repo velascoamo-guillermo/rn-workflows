@@ -22,6 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - With `ota`, the iOS lane stops at TestFlight: a `store` target uploads to
   TestFlight and never calls `upload_to_app_store` (submit from App Store
   Connect).
+- With `ota`, native lanes set their own build numbers: iOS uses the latest
+  TestFlight build + 1 (`increment_build_number`), Android the highest Play
+  versionCode across tracks + 1 (`android.injected.version.code`). Manual
+  `ios.buildNumber` / `android.versionCode` values are overridden.
 
 ### Added
 

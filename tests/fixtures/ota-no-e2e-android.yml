@@ -1,0 +1,17 @@
+project:
+  type: expo
+  bundleId: com.example.otaandroid
+  packageName: com.example.otaandroid
+
+ci: github-actions
+
+build:
+  production:
+    platform: android
+    distribution: store
+    android:
+      buildType: aab
+      track: internal
+    ota:
+      server: https://ota.example.com
+      channel: production

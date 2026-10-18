@@ -163,7 +163,7 @@ describe('native release tag lookup + push', () => {
     const r = await runStep(recheck, { cwd: work, env });
     expect(r.code).toBe(0);
     expect(r.outputs.exists).toBe('true');
-    expect(r.stdout).toContain('skipping');
+    expect(r.stdout).toContain('shipping this commit as an OTA update');
   });
 
   test('tag push is a no-op success when the tag already exists on origin', async () => {

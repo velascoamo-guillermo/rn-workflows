@@ -2,6 +2,7 @@ import { e2ePlatforms, resolveStagingChannel, type Config } from '../config/sche
 import { renderTemplate, yamlScalar } from '../utils/render.ts';
 import { platformsFor, secretsFor } from '../secrets.ts';
 import { resolveScheme, type GeneratedFile } from './fastlane.ts';
+import { EMULATOR_RUNNER_VERSION, MAESTRO_VERSION, PARTIAL_DEFAULTS } from './github-actions.ts';
 import {
   branchFor,
   e2eCacheKey,
@@ -82,6 +83,8 @@ interface ReleaseLeg {
   e2e: boolean;
   flows: string;
   iosDevice: string;
+  /** Maestro appId (iOS bundle id / Android package name); '' without e2e. */
+  appId: string;
   /** Native release tag prefix; full tag `<tagPrefix>/<hash>`. */
   tagPrefix: string;
   /** Concurrency group shared by this leg's ota and native jobs. */
@@ -233,6 +236,7 @@ function renderOtaMode(
   const releaseLegs: ReleaseLeg[] = [];
   const otaBranches = new Set<string>();
   let usesMatch = false;
+  const e2eProjectTypes = new Set<string>();
 
   for (const app of apps) {
     const scheme = resolveScheme(app.config, app.scheme);
@@ -252,6 +256,8 @@ function renderOtaMode(
         const runsOn = runsOnFor(app.config, platform);
         const stagingChannel = profile.ota ? resolveStagingChannel(profile.ota) : '';
         const e2e = e2eFor.includes(platform);
+        if (e2e) e2eProjectTypes.add(app.config.project.type);
+        const appId = platform === 'ios' ? app.config.project.bundleId : (app.config.project.packageName ?? app.config.project.bundleId);
         if (platform === 'ios' && secretsFor(platform, profile.distribution).includes('MATCH_PASSWORD')) {
           usesMatch = true;
         }
@@ -270,6 +276,7 @@ function renderOtaMode(
           e2e,
           flows: e2e ? (profile.e2e?.maestro.flows ?? '') : '',
           iosDevice: e2e ? (profile.e2e?.maestro.iosDevice ?? '') : '',
+          appId: e2e ? appId : '',
           tagPrefix: nativeTagPrefix(ref),
           group: legConcurrencyGroup(ref),
           e2eCachePrefix: e2e ? e2eCacheKey(ref, stagingChannel, '') : '',
@@ -281,8 +288,14 @@ function renderOtaMode(
     }
   }
 
+  if (e2eProjectTypes.size > 1) {
+    throw new Error(
+      'generate --matrix: e2e apps mix expo and bare projects; the matrix e2e steps support one project type per workflow',
+    );
+  }
   const quality = qualityLegs(apps);
   return renderTemplate('github/workflow-matrix.ejs', {
+    ...PARTIAL_DEFAULTS,
     otaMode: true,
     packageManager,
     qualityLegsJson: JSON.stringify(quality),
@@ -297,5 +310,20 @@ function renderOtaMode(
     maxParallelOne: usesMatch,
     expoCli: expoCliFor(packageManager),
     installCommand: installCommandFor(packageManager),
+    hasIosE2e: releaseLegs.some((leg) => leg.e2e && leg.platform === 'ios'),
+    hasAndroidE2e: releaseLegs.some((leg) => leg.e2e && leg.platform === 'android'),
+    projectType: [...e2eProjectTypes][0] ?? 'expo',
+    maestroVersion: MAESTRO_VERSION,
+    emulatorRunnerVersion: EMULATOR_RUNNER_VERSION,
+    appDir: '${{ matrix.dir }}',
+    // e2e view for the shared partials: every value comes from the leg.
+    e2e: {
+      cacheKey: '${{ matrix.e2eCachePrefix }}${{ matrix.hash }}',
+      stagingChannel: '${{ matrix.stagingChannel }}',
+      flows: '${{ matrix.flows }}',
+      appId: '${{ matrix.appId }}',
+      scheme: '${{ matrix.scheme }}',
+      iosDevice: '${{ matrix.iosDevice }}',
+    },
   });
 }

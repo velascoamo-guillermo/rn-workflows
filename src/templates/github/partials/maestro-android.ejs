@@ -3,11 +3,18 @@
   API 34 x86_64, KVM on hosted runners). The emulator action runs `script:`
   line by line, so the steps live in a generated bash script; values reach it
   through the action's env, never `${{` in the script.
-  Locals: e2e (view), guard (bool), maestroVersion, selfHosted, appDir.
+  Locals: e2e (view), guard (bool), maestroVersion, selfHosted, appDir,
+  idPrefix (this partial's step ids), pkgPrefix (id prefix of the update-id
+  step), gate (bare `if:` condition or ''), kvmIf (extra runtime condition
+  for the KVM step, e.g. `!matrix.selfHosted`; '' by default).
 -%>
+<% const kvmGate = joinIf(gate, kvmIf); -%>
 <%- include('maestro-install-step') -%>
 <% if (!selfHosted) { -%>
       - name: Enable KVM
+<% if (kvmGate) { -%>
+        if: <%- kvmGate %>
+<% } -%>
         run: |
           set -euo pipefail
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -19,7 +26,10 @@
 <%- include('guard-flow-step') -%>
 <% } -%>
       - name: Write Maestro script (android)
-        id: maestro-script
+        id: <%= idPrefix %>maestro-script
+<% if (gate) { -%>
+        if: <%- gate %>
+<% } -%>
         run: |
           set -euo pipefail
           cat > "$RUNNER_TEMP/rnw-maestro.sh" <<'SH'
@@ -34,13 +44,16 @@
           SH
 
       - name: Run Maestro flows (android emulator)
-        id: maestro
+        id: <%= idPrefix %>maestro
+<% if (gate) { -%>
+        if: <%- gate %>
+<% } -%>
         uses: reactivecircus/android-emulator-runner@<%= emulatorRunnerVersion %>
         env:
           RNW_APP_ID: <%- e2e.appId %>
           RNW_FLOWS: <%- e2e.flows %>
 <% if (guard) { -%>
-          RNW_EXPECTED_UPDATE_ID: ${{ steps.update-id.outputs.update_id }}
+          RNW_EXPECTED_UPDATE_ID: ${{ steps.<%= pkgPrefix %>update-id.outputs.update_id }}
 <% } -%>
         with:
           api-level: 34

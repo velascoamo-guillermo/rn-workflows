@@ -167,22 +167,7 @@ jobs:
       - name: Install JS dependencies
         run: <%= packageManager === 'bun' ? 'bun install --frozen-lockfile' : packageManager === 'npm' ? 'npm ci' : 'yarn install --frozen-lockfile' %>
 
-<%- include('partials/ota-package-steps', { platform: job.platform }) -%>
-<% if (job.e2e) { -%>
-<%- include('partials/ota-upload-step', { stepId: 'upload-staging', stepName: 'Upload OTA update to staging channel', otaChannel: job.e2e.stagingChannel, hashExpr: job.hashExpr }) -%>
-<% if (job.platform === 'ios' && !job.selfHosted) { -%>
-      - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-<% } -%>
-<%- include(`partials/e2e-binary-${job.platform}`, { e2e: job.e2e, hashExpr: job.hashExpr, setupJava: true, restore: true }) -%>
-<%- include(`partials/maestro-${job.platform}`, { e2e: job.e2e, guard: true, selfHosted: job.selfHosted }) -%>
-<%- include('partials/ota-upload-step', { stepId: 'promote', stepName: 'Promote OTA update to production channel', hashExpr: job.hashExpr }) -%>
-<% } else { -%>
-<%- include('partials/ota-upload-step', { hashExpr: `\${{ needs.fingerprint.outputs.${job.platform}_hash }}` }) -%>
-<% } -%>
+<%- include('partials/ota-ship-steps', { job, toolchain: true }) -%>
 <% } -%>
 <% for (const job of jobs) { -%>
   native-<%= job.platform %>:
@@ -278,7 +263,6 @@ jobs:
 <% } -%>
 
 <%- include('partials/native-tag-step', { ifExpr: "steps.recheck.outputs.exists != 'true'", tagPrefix: job.tagPrefix, hashExpr: `\${{ needs.fingerprint.outputs.${job.platform}_hash }}` }) -%>
-<% if (job !== jobs[jobs.length - 1]) { -%>
 
-<% } -%>
+<%- include('partials/ota-ship-steps', { job, toolchain: false, idPrefix: 'ota-', pkgPrefix: 'ota-', gate: "steps.recheck.outputs.exists == 'true'" }) -%>
 <% } -%>

@@ -5,11 +5,16 @@
   native dir is restored right after the test build.
   Locals: e2e (view from github-actions.ts), expoCli, projectType, hashExpr,
   restore (bool: OTA path restores/saves the cache and skips the build on a
-  hit; the native path always builds fresh and saves after its flows pass).
+  hit; the native path always builds fresh and saves after its flows pass),
+  idPrefix (step id prefix), gate (bare `if:` condition ANDed into every step).
 -%>
+<% const buildIf = joinIf(gate, restore && `steps.${idPrefix}e2e-cache.outputs.cache-hit != 'true'`); -%>
 <% if (restore) { -%>
       - name: Restore e2e test binary (ios)
-        id: e2e-cache
+        id: <%= idPrefix %>e2e-cache
+<% if (gate) { -%>
+        if: <%- gate %>
+<% } -%>
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/rnw-e2e/ios
@@ -18,9 +23,9 @@
 <% } -%>
 <% if (projectType === 'expo') { -%>
       - name: Prebuild native project for e2e (ios)
-        id: e2e-prebuild
-<% if (restore) { -%>
-        if: steps.e2e-cache.outputs.cache-hit != 'true'
+        id: <%= idPrefix %>e2e-prebuild
+<% if (buildIf) { -%>
+        if: <%- buildIf %>
 <% } -%>
         env:
           RNW_PLATFORM: ios
@@ -28,9 +33,9 @@
 
 <% } -%>
       - name: Point test binary at the staging channel (ios)
-        id: e2e-patch
-<% if (restore) { -%>
-        if: steps.e2e-cache.outputs.cache-hit != 'true'
+        id: <%= idPrefix %>e2e-patch
+<% if (buildIf) { -%>
+        if: <%- buildIf %>
 <% } -%>
         env:
           RNW_SCHEME: <%- e2e.scheme %>
@@ -49,9 +54,9 @@
           plutil -replace EXUpdatesLaunchWaitMs -integer 30000 "$PLIST"
 
       - name: Build e2e test binary (ios simulator)
-        id: e2e-build
-<% if (restore) { -%>
-        if: steps.e2e-cache.outputs.cache-hit != 'true'
+        id: <%= idPrefix %>e2e-build
+<% if (buildIf) { -%>
+        if: <%- buildIf %>
 <% } -%>
         env:
           RNW_SCHEME: <%- e2e.scheme %>
@@ -76,9 +81,9 @@
 <%- include('e2e-save-step', { platform: 'ios' }) -%>
 <% } -%>
       - name: Restore native project after the test build (ios)
-        id: e2e-unpatch
-<% if (restore) { -%>
-        if: steps.e2e-cache.outputs.cache-hit != 'true'
+        id: <%= idPrefix %>e2e-unpatch
+<% if (buildIf) { -%>
+        if: <%- buildIf %>
 <% } -%>
 <% if (projectType === 'expo') { -%>
         env:

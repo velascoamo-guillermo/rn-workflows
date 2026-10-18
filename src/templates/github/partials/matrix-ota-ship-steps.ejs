@@ -1,0 +1,32 @@
+<%#
+  Matrix workflow: ship this commit as an OTA update for the current leg.
+  e2e legs: package → upload(staging) → test binary (restore, else build) →
+  update-id guard → flows → promote; other legs: package → upload(channel).
+  Platform steps are gated on matrix.platform and prefixed `<idPrefix><p>-`
+  (ids must be unique per job). Used by the ota job and by the native job
+  when its tag re-check hits.
+  Locals: idPrefix (prefix of every step id; '' or 'ota-'), gate (bare `if:`
+  condition ANDed into every step), toolchain (bool: select Xcode / set up the
+  JDK here; the native job already did). Uses top-level e2e (matrix view),
+  hasIosE2e, hasAndroidE2e.
+-%>
+<% const hash = '${{ matrix.hash }}'; -%>
+<%- include('ota-package-steps', { platform: '${{ matrix.platform }}' }) -%>
+<%- include('ota-upload-step', { stepId: `${idPrefix}upload`, gate: joinIf(gate, '!matrix.e2e'), otaServer: '${{ matrix.otaServer }}', otaChannel: '${{ matrix.otaChannel }}', hashExpr: hash }) -%>
+<% if (hasIosE2e || hasAndroidE2e) { -%>
+<%- include('ota-upload-step', { stepId: `${idPrefix}upload-staging`, stepName: 'Upload OTA update to staging channel', gate: joinIf(gate, 'matrix.e2e'), otaServer: '${{ matrix.otaServer }}', otaChannel: e2e.stagingChannel, hashExpr: hash }) -%>
+<% for (const p of ['ios', 'android'].filter((x) => x === 'ios' ? hasIosE2e : hasAndroidE2e)) { -%>
+<% const legGate = joinIf(gate, `matrix.platform == '${p}'`, 'matrix.e2e'); -%>
+<% if (toolchain && p === 'ios') { -%>
+      - name: Select Xcode
+        if: <%- joinIf(legGate, '!matrix.selfHosted') %>
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+<% } -%>
+<%- include(`e2e-binary-${p}`, { idPrefix: `${idPrefix}${p}-`, gate: legGate, hashExpr: hash, setupJava: toolchain, restore: true }) -%>
+<%- include(`maestro-${p}`, { idPrefix: `${idPrefix}${p}-`, pkgPrefix: idPrefix, gate: legGate, guard: true, selfHosted: false, kvmIf: '!matrix.selfHosted' }) -%>
+<% } -%>
+<%- include('ota-upload-step', { stepId: `${idPrefix}promote`, stepName: 'Promote OTA update to production channel', gate: joinIf(gate, 'matrix.e2e'), otaServer: '${{ matrix.otaServer }}', otaChannel: '${{ matrix.otaChannel }}', hashExpr: hash }) -%>
+<% } -%>

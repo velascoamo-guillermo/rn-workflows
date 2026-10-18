@@ -278,7 +278,7 @@ jobs:
           git ls-remote --exit-code --tags origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" > /dev/null || rc=$?
           case "$rc" in
             0)
-              echo "::notice::Native release $RNW_TAG_PREFIX/$RNW_HASH already exists on origin; skipping build, upload and tag"
+              echo "::notice::Native release $RNW_TAG_PREFIX/$RNW_HASH already exists on origin; shipping this commit as an OTA update instead of a store build"
               echo "exists=true" >> "$GITHUB_OUTPUT" ;;
             2) echo "exists=false" >> "$GITHUB_OUTPUT" ;;
             *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
@@ -306,6 +306,51 @@ jobs:
             2) git tag "$RNW_TAG_PREFIX/$RNW_HASH" && git push origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" ;;
             *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
           esac
+
+      - name: Export JS bundle (android)
+        id: ota-export
+        if: steps.recheck.outputs.exists == 'true'
+        env:
+          RNW_PLATFORM: android
+        run: yarn expo export --platform "$RNW_PLATFORM" --output-dir dist
+
+      - name: Package bundle
+        id: ota-package
+        if: steps.recheck.outputs.exists == 'true'
+        run: |
+          set -euo pipefail
+          yarn expo config --type public --json > dist/expoconfig.json
+          jq -e . dist/expoconfig.json > /dev/null
+          rm -f bundle.zip
+          (cd dist && zip -qr ../bundle.zip .)
+
+      - name: Compute update id
+        id: ota-update-id
+        if: steps.recheck.outputs.exists == 'true'
+        run: |
+          set -euo pipefail
+          UPDATE_ID=$(node -e 'const h = require("crypto").createHash("sha256").update(require("fs").readFileSync("dist/metadata.json")).digest("hex"); console.log([h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20, 32)].join("-"))')
+          echo "update_id=$UPDATE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Upload OTA update
+        id: ota-upload
+        if: steps.recheck.outputs.exists == 'true'
+        env:
+          RNW_OTA_SERVER: 'https://ota.myapp.com'
+          RNW_CHANNEL: production
+          RNW_HASH: \${{ needs.fingerprint.outputs.android_hash }}
+          RNW_COMMIT_MESSAGE: \${{ github.event.head_commit.message }}
+          OTA_UPLOAD_KEY: \${{ secrets.OTA_UPLOAD_KEY }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$OTA_UPLOAD_KEY" | curl --fail-with-body -sS --connect-timeout 30 --max-time 600 \\
+            -X POST "$RNW_OTA_SERVER/api/upload" \\
+            -F "file=@bundle.zip" \\
+            --form-string "runtimeVersion=$RNW_HASH" \\
+            --form-string "channel=$RNW_CHANNEL" \\
+            --form-string "commitHash=$GITHUB_SHA" \\
+            --form-string "commitMessage=$RNW_COMMIT_MESSAGE" \\
+            -F "uploadKey=<-"
 
   native-ios:
     name: Build production (ios)
@@ -354,7 +399,7 @@ jobs:
           git ls-remote --exit-code --tags origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" > /dev/null || rc=$?
           case "$rc" in
             0)
-              echo "::notice::Native release $RNW_TAG_PREFIX/$RNW_HASH already exists on origin; skipping build, upload and tag"
+              echo "::notice::Native release $RNW_TAG_PREFIX/$RNW_HASH already exists on origin; shipping this commit as an OTA update instead of a store build"
               echo "exists=true" >> "$GITHUB_OUTPUT" ;;
             2) echo "exists=false" >> "$GITHUB_OUTPUT" ;;
             *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
@@ -388,5 +433,51 @@ jobs:
             2) git tag "$RNW_TAG_PREFIX/$RNW_HASH" && git push origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" ;;
             *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
           esac
+
+      - name: Export JS bundle (ios)
+        id: ota-export
+        if: steps.recheck.outputs.exists == 'true'
+        env:
+          RNW_PLATFORM: ios
+        run: yarn expo export --platform "$RNW_PLATFORM" --output-dir dist
+
+      - name: Package bundle
+        id: ota-package
+        if: steps.recheck.outputs.exists == 'true'
+        run: |
+          set -euo pipefail
+          yarn expo config --type public --json > dist/expoconfig.json
+          jq -e . dist/expoconfig.json > /dev/null
+          rm -f bundle.zip
+          (cd dist && zip -qr ../bundle.zip .)
+
+      - name: Compute update id
+        id: ota-update-id
+        if: steps.recheck.outputs.exists == 'true'
+        run: |
+          set -euo pipefail
+          UPDATE_ID=$(node -e 'const h = require("crypto").createHash("sha256").update(require("fs").readFileSync("dist/metadata.json")).digest("hex"); console.log([h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20, 32)].join("-"))')
+          echo "update_id=$UPDATE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Upload OTA update
+        id: ota-upload
+        if: steps.recheck.outputs.exists == 'true'
+        env:
+          RNW_OTA_SERVER: 'https://ota.myapp.com'
+          RNW_CHANNEL: production
+          RNW_HASH: \${{ needs.fingerprint.outputs.ios_hash }}
+          RNW_COMMIT_MESSAGE: \${{ github.event.head_commit.message }}
+          OTA_UPLOAD_KEY: \${{ secrets.OTA_UPLOAD_KEY }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$OTA_UPLOAD_KEY" | curl --fail-with-body -sS --connect-timeout 30 --max-time 600 \\
+            -X POST "$RNW_OTA_SERVER/api/upload" \\
+            -F "file=@bundle.zip" \\
+            --form-string "runtimeVersion=$RNW_HASH" \\
+            --form-string "channel=$RNW_CHANNEL" \\
+            --form-string "commitHash=$GITHUB_SHA" \\
+            --form-string "commitMessage=$RNW_COMMIT_MESSAGE" \\
+            -F "uploadKey=<-"
+
 "
 `;

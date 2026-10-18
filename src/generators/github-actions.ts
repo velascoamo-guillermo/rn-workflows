@@ -18,6 +18,12 @@ export const MAESTRO_VERSION = '2.11.0';
 /** reactivecircus/android-emulator-runner, pinned to a full release tag. */
 export const EMULATOR_RUNNER_VERSION = 'v2.38.0';
 
+/**
+ * Default locals for the step partials: no step id prefix, no extra `if:`
+ * gate, no extra KVM condition. Callers override them per include.
+ */
+export const PARTIAL_DEFAULTS = { idPrefix: '', pkgPrefix: '', gate: '', kvmIf: '' } as const;
+
 /** Per-leg e2e view for the smart workflow partials (YAML-rendered values). */
 interface E2eView {
   cacheKey: string;
@@ -140,6 +146,7 @@ export function generateGithubActions(
             projectType: config.project.type,
             maestroVersion: MAESTRO_VERSION,
             emulatorRunnerVersion: EMULATOR_RUNNER_VERSION,
+            ...PARTIAL_DEFAULTS,
           }
         : {}),
     });

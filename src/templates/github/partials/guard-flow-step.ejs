@@ -2,9 +2,13 @@
   Write the update-id guard flow: launch the app and wait until the element
   with testID rnw-update-id shows the expected update id (proves the staging
   update ran, not the embedded bundle). Maestro substitutes ${...} via -e.
+  Locals: idPrefix, gate.
 -%>
       - name: Write update-id guard flow
-        id: guard-flow
+        id: <%= idPrefix %>guard-flow
+<% if (gate) { -%>
+        if: <%- gate %>
+<% } -%>
         run: |
           set -euo pipefail
           cat > "$RUNNER_TEMP/rnw-assert-update.yaml" <<'YAML'

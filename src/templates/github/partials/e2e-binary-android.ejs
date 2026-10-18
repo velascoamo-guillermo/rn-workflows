@@ -5,11 +5,16 @@
   The store binary is never patched: the manifest is restored right after.
   Locals: e2e (view from github-actions.ts), expoCli, projectType, hashExpr,
   restore (bool: OTA path restores/saves the cache and skips the build on a
-  hit; the native path always builds fresh and saves after its flows pass).
+  hit; the native path always builds fresh and saves after its flows pass),
+  idPrefix (step id prefix), gate (bare `if:` condition ANDed into every step).
 -%>
+<% const buildIf = joinIf(gate, restore && `steps.${idPrefix}e2e-cache.outputs.cache-hit != 'true'`); -%>
 <% if (restore) { -%>
       - name: Restore e2e test binary (android)
-        id: e2e-cache
+        id: <%= idPrefix %>e2e-cache
+<% if (gate) { -%>
+        if: <%- gate %>
+<% } -%>
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/rnw-e2e/android
@@ -18,9 +23,9 @@
 <% } -%>
 <% if (projectType === 'expo') { -%>
       - name: Prebuild native project for e2e (android)
-        id: e2e-prebuild
-<% if (restore) { -%>
-        if: steps.e2e-cache.outputs.cache-hit != 'true'
+        id: <%= idPrefix %>e2e-prebuild
+<% if (buildIf) { -%>
+        if: <%- buildIf %>
 <% } -%>
         env:
           RNW_PLATFORM: android
@@ -28,9 +33,9 @@
 
 <% } -%>
       - name: Point test binary at the staging channel (android)
-        id: e2e-patch
-<% if (restore) { -%>
-        if: steps.e2e-cache.outputs.cache-hit != 'true'
+        id: <%= idPrefix %>e2e-patch
+<% if (buildIf) { -%>
+        if: <%- buildIf %>
 <% } -%>
         env:
           RNW_STAGING_CHANNEL: <%- e2e.stagingChannel %>
@@ -59,8 +64,8 @@
 
 <% if (setupJava) { -%>
       - name: Setup JDK
-<% if (restore) { -%>
-        if: steps.e2e-cache.outputs.cache-hit != 'true'
+<% if (buildIf) { -%>
+        if: <%- buildIf %>
 <% } -%>
         uses: actions/setup-java@v4
         with:
@@ -69,9 +74,9 @@
 
 <% } -%>
       - name: Build e2e test binary (android release apk)
-        id: e2e-build
-<% if (restore) { -%>
-        if: steps.e2e-cache.outputs.cache-hit != 'true'
+        id: <%= idPrefix %>e2e-build
+<% if (buildIf) { -%>
+        if: <%- buildIf %>
 <% } -%>
         env:
           EXPO_UPDATES_FINGERPRINT_OVERRIDE: <%- hashExpr %>
@@ -88,9 +93,9 @@
 <%- include('e2e-save-step', { platform: 'android' }) -%>
 <% } -%>
       - name: Restore native project after the test build (android)
-        id: e2e-unpatch
-<% if (restore) { -%>
-        if: steps.e2e-cache.outputs.cache-hit != 'true'
+        id: <%= idPrefix %>e2e-unpatch
+<% if (buildIf) { -%>
+        if: <%- buildIf %>
 <% } -%>
 <% if (projectType === 'expo') { -%>
         run: cp "$RUNNER_TEMP/rnw-e2e-orig/AndroidManifest.xml" android/app/src/main/AndroidManifest.xml

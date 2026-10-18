@@ -19,24 +19,6 @@ const fixtures = readdirSync(fixturesDir)
   .filter((f) => f.endsWith('.yml'))
   .sort();
 
-/**
- * Known finding in the legacy smart (OTA) workflow: it interpolates
- * `github.event.head_commit.message` inside a `run:`. Fixing it changes
- * non-ota output (snapshots must stay byte-identical), so it is ignored for
- * the legacy group only. TODO: remove once the OTA rework lands.
- */
-const LEGACY_IGNORES = ['"github.event.head_commit.message" is potentially untrusted'];
-
-/**
- * Temporary: the ota group renders through the LEGACY smart template until
- * #51 rewrites it. Both findings below come from that template only.
- */
-// TODO(#51): remove
-const OTA_IGNORES = [
-  '"github.event.head_commit.message" is potentially untrusted',
-  'SC2086',
-];
-
 interface Group {
   label: string;
   shellcheck: boolean;
@@ -88,12 +70,11 @@ try {
       continue;
     }
     const args = group.shellcheck
-      ? ['-config-file', actionlintConfig, ...OTA_IGNORES.flatMap((pattern) => ['-ignore', pattern.replace(/[.]/g, '\\.')]), ...group.files]
+      ? ['-config-file', actionlintConfig, ...group.files]
       : [
           '-config-file',
           actionlintConfig,
           '-shellcheck=',
-          ...LEGACY_IGNORES.flatMap((pattern) => ['-ignore', pattern.replace(/[.]/g, '\\.')]),
           ...group.files,
         ];
     const result = spawnSync('actionlint', args, { stdio: 'inherit' });

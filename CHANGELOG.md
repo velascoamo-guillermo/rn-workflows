@@ -27,6 +27,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   versionCode across tracks + 1 (`android.injected.version.code`). Manual
   `ios.buildNumber` / `android.versionCode` values are overridden.
 
+- `generate --matrix` workflows with `ota` are now push-triggered (with
+  change detection): OTA matrix apps ship on every push to the profile
+  branch, not only on `v*` tags.
+- Per-app `generate` no longer writes a per-app workflow when the git root
+  already has `.github/workflows/rn-release-matrix.yml`; it writes Fastlane
+  files (and SETUP.md) only.
+
 ### Added
 
 - `ota.stagingChannel`, `e2e.maestro` (`flows`, `platforms`, `iosDevice`),
@@ -34,9 +41,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Self-hosted runner toolchain setup.
 - Staging upload, e2e update-id guard, Maestro run and auto-promote to the
   production channel.
-- `generate --matrix`: push trigger with change detection, plan-time
-  fingerprint routing, ota/native matrices; a native re-check that finds
-  another run already released the fingerprint ships the commit as an OTA.
+- `generate --matrix`: plan-time fingerprint routing, ota/native matrices; a
+  native re-check that finds another run already released the fingerprint
+  ships the commit as an OTA.
 - OTA/e2e readiness checks and an "OTA updates" section in `SETUP.md`.
 - Fresh-app acceptance tests for ota+e2e (single app and monorepo).
 

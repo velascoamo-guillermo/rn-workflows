@@ -10,7 +10,11 @@ import {
   type GithubActionsOptions,
 } from '../generators/github-actions.ts';
 import { generateGitlab } from '../generators/gitlab.ts';
-import { generateMatrixWorkflow, type MatrixApp } from '../generators/github-matrix.ts';
+import {
+  generateMatrixWorkflow,
+  MATRIX_WORKFLOW_FILENAME,
+  type MatrixApp,
+} from '../generators/github-matrix.ts';
 import { writeFileEnsured } from '../utils/fs.ts';
 import {
   assignUniqueSlugs,
@@ -85,7 +89,8 @@ function writeFiles(files: GeneratedFile[], { outDir, dryRun, secretsSummary }: 
 /**
  * `generate --matrix`: discover every rn-workflows.yml under the git root and
  * emit ONE strategy.matrix release workflow instead of N per-app workflows.
- * Fastlane files stay per-app — run plain `generate` inside each app dir.
+ * Fastlane files stay per-app — run plain `generate` inside each app dir;
+ * once this workflow exists, per-app `generate` writes Fastlane files only.
  */
 function runMatrix(args: {
   cwd: string;
@@ -219,6 +224,15 @@ function resolveMatrixSetupMdPath(gitRoot: string): { path: string; redirected: 
   if (firstLine === SETUP_MD_GENERATED_MARKER) return { path: 'SETUP.md', redirected: false };
 
   return { path: 'rn-workflows.SETUP.md', redirected: true };
+}
+
+/** Path of an existing `rn-release-matrix.yml` (git-root default dir or the resolved one), else null. */
+function findMatrixWorkflow(gitRoot: string | null, workflowsDir: string): string | null {
+  const candidates = [
+    ...(gitRoot ? [join(gitRoot, '.github', 'workflows', MATRIX_WORKFLOW_FILENAME)] : []),
+    join(workflowsDir, MATRIX_WORKFLOW_FILENAME),
+  ];
+  return candidates.find((c) => existsSync(c)) ?? null;
 }
 
 function collectOtaReadiness(config: Config, appDir: string, app?: string): OtaSetupProfile[] {
@@ -363,10 +377,22 @@ export default defineCommand({
     const otaReports = collectOtaReadiness(config, appDirAbs);
     logOtaFindings(otaReports);
 
+    // A push-triggered matrix workflow already owns CI for this repo: a
+    // per-app workflow next to it would run a second release pipeline per app.
+    const matrixWorkflow =
+      config.ci === 'github-actions' ? findMatrixWorkflow(gitRoot, workflowsDir) : null;
+    if (matrixWorkflow) {
+      p.log.info(
+        `The matrix workflow owns CI for this repo (${matrixWorkflow}) — skipping the per-app workflow; only Fastlane files (and SETUP.md) were written.`,
+      );
+    }
+
     const files: GeneratedFile[] = [
       ...generateFastlane(config, { packageManager, scheme: detectedScheme }),
       ...(config.ci === 'github-actions'
-        ? generateGithubActions(config, githubOptions)
+        ? matrixWorkflow
+          ? []
+          : generateGithubActions(config, githubOptions)
         : generateGitlab(config)),
       ...(requiredSecrets.length > 0
         ? [{ path: 'SETUP.md', content: buildSetupMarkdown(requiredSecrets, config.ci, [buildOtaSetupSection(otaReports)]) }]

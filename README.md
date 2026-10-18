@@ -189,7 +189,7 @@ Either way, `SETUP.md` is added next to `fastlane/` whenever the config requires
 
 ## Monorepos (matrix mode)
 
-`rn-workflows generate --matrix` discovers every `rn-workflows.yml` under the git root and emits a single `strategy.matrix` release workflow (GitHub Actions only). Fastlane files stay per-app — run plain `generate` inside each app directory.
+`rn-workflows generate --matrix` discovers every `rn-workflows.yml` under the git root and emits a single `strategy.matrix` release workflow (GitHub Actions only). Use `generate --matrix` for CI, and run plain `generate` inside each app directory for its Fastlane files only: when `<git root>/.github/workflows/rn-release-matrix.yml` exists, per-app `generate` skips the per-app workflow automatically (a second push-triggered pipeline per app would duplicate every release).
 
 Where workflow files are written:
 

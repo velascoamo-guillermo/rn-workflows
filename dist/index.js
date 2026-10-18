@@ -1532,6 +1532,13 @@ function resolveMatrixSetupMdPath(gitRoot) {
     return { path: "SETUP.md", redirected: false };
   return { path: "rn-workflows.SETUP.md", redirected: true };
 }
+function findMatrixWorkflow(gitRoot, workflowsDir) {
+  const candidates = [
+    ...gitRoot ? [join3(gitRoot, ".github", "workflows", MATRIX_WORKFLOW_FILENAME)] : [],
+    join3(workflowsDir, MATRIX_WORKFLOW_FILENAME)
+  ];
+  return candidates.find((c) => existsSync2(c)) ?? null;
+}
 function collectOtaReadiness(config, appDir, app) {
   return Object.entries(config.build).filter(([, profile]) => profile.ota).map(([name, profile]) => ({
     ...app ? { app } : {},
@@ -1650,9 +1657,13 @@ var generate_default = defineCommand2({
     const requiredSecrets = deriveRequiredSecrets(config);
     const otaReports = collectOtaReadiness(config, appDirAbs);
     logOtaFindings(otaReports);
+    const matrixWorkflow = config.ci === "github-actions" ? findMatrixWorkflow(gitRoot, workflowsDir) : null;
+    if (matrixWorkflow) {
+      p2.log.info(`The matrix workflow owns CI for this repo (${matrixWorkflow}) — skipping the per-app workflow; only Fastlane files (and SETUP.md) were written.`);
+    }
     const files = [
       ...generateFastlane(config, { packageManager, scheme: detectedScheme }),
-      ...config.ci === "github-actions" ? generateGithubActions(config, githubOptions) : generateGitlab(config),
+      ...config.ci === "github-actions" ? matrixWorkflow ? [] : generateGithubActions(config, githubOptions) : generateGitlab(config),
       ...requiredSecrets.length > 0 ? [{ path: "SETUP.md", content: buildSetupMarkdown(requiredSecrets, config.ci, [buildOtaSetupSection(otaReports)]) }] : []
     ];
     writeFiles(files, {

@@ -94,6 +94,18 @@ jobs:
             *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
           esac
 
+      - name: Require distinct per-platform runtimeVersions
+        id: fp-distinct
+        env:
+          RNW_IOS_HASH: \${{ steps.fp-ios.outputs.hash }}
+          RNW_ANDROID_HASH: \${{ steps.fp-android.outputs.hash }}
+        run: |
+          set -euo pipefail
+          if [ "$RNW_IOS_HASH" = "$RNW_ANDROID_HASH" ]; then
+            echo "::error::ios and android resolved the same runtimeVersion ($RNW_IOS_HASH); per-platform OTA uploads would collide on the server. Use runtimeVersion: { policy: \\"fingerprint\\" } in app config"
+            exit 1
+          fi
+
   ota-android:
     name: OTA update production (android)
     runs-on: ubuntu-latest
@@ -147,13 +159,14 @@ jobs:
           OTA_UPLOAD_KEY: \${{ secrets.OTA_UPLOAD_KEY }}
         run: |
           set -euo pipefail
-          curl --fail-with-body -sS -X POST "$RNW_OTA_SERVER/api/upload" \\
+          printf '%s' "$OTA_UPLOAD_KEY" | curl --fail-with-body -sS --connect-timeout 30 --max-time 600 \\
+            -X POST "$RNW_OTA_SERVER/api/upload" \\
             -F "file=@bundle.zip" \\
             --form-string "runtimeVersion=$RNW_HASH" \\
             --form-string "channel=$RNW_CHANNEL" \\
             --form-string "commitHash=$GITHUB_SHA" \\
             --form-string "commitMessage=$RNW_COMMIT_MESSAGE" \\
-            --form-string "uploadKey=$OTA_UPLOAD_KEY"
+            -F "uploadKey=<-"
 
   ota-ios:
     name: OTA update production (ios)
@@ -208,13 +221,14 @@ jobs:
           OTA_UPLOAD_KEY: \${{ secrets.OTA_UPLOAD_KEY }}
         run: |
           set -euo pipefail
-          curl --fail-with-body -sS -X POST "$RNW_OTA_SERVER/api/upload" \\
+          printf '%s' "$OTA_UPLOAD_KEY" | curl --fail-with-body -sS --connect-timeout 30 --max-time 600 \\
+            -X POST "$RNW_OTA_SERVER/api/upload" \\
             -F "file=@bundle.zip" \\
             --form-string "runtimeVersion=$RNW_HASH" \\
             --form-string "channel=$RNW_CHANNEL" \\
             --form-string "commitHash=$GITHUB_SHA" \\
             --form-string "commitMessage=$RNW_COMMIT_MESSAGE" \\
-            --form-string "uploadKey=$OTA_UPLOAD_KEY"
+            -F "uploadKey=<-"
 
   native-android:
     name: Build production (android)
@@ -225,6 +239,9 @@ jobs:
       EXPO_UPDATES_FINGERPRINT_OVERRIDE: \${{ needs.fingerprint.outputs.android_hash }}
     needs: fingerprint
     if: needs.fingerprint.outputs.android_native_exists != 'true'
+    concurrency:
+      group: rnw-production-android
+      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -250,7 +267,25 @@ jobs:
       - name: Install JS dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Re-check native release tag
+        id: recheck
+        env:
+          RNW_TAG_PREFIX: rnw/native/production/android
+          RNW_HASH: \${{ needs.fingerprint.outputs.android_hash }}
+        run: |
+          set -euo pipefail
+          rc=0
+          git ls-remote --exit-code --tags origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" > /dev/null || rc=$?
+          case "$rc" in
+            0)
+              echo "::notice::Native release $RNW_TAG_PREFIX/$RNW_HASH already exists on origin; skipping build, upload and tag"
+              echo "exists=true" >> "$GITHUB_OUTPUT" ;;
+            2) echo "exists=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
+          esac
+
       - name: Run Fastlane lane production (android)
+        if: steps.recheck.outputs.exists != 'true'
         run: bundle exec fastlane android production
         env:
           PLAY_STORE_JSON_KEY: \${{ secrets.PLAY_STORE_JSON_KEY }}
@@ -258,10 +293,19 @@ jobs:
 
       - name: Tag native release
         id: tag
+        if: steps.recheck.outputs.exists != 'true'
         env:
           RNW_TAG_PREFIX: rnw/native/production/android
           RNW_HASH: \${{ needs.fingerprint.outputs.android_hash }}
-        run: git tag "$RNW_TAG_PREFIX/$RNW_HASH" && git push origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH"
+        run: |
+          set -euo pipefail
+          rc=0
+          git ls-remote --exit-code --tags origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" > /dev/null || rc=$?
+          case "$rc" in
+            0) echo "Tag $RNW_TAG_PREFIX/$RNW_HASH already on origin; nothing to push" ;;
+            2) git tag "$RNW_TAG_PREFIX/$RNW_HASH" && git push origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" ;;
+            *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
+          esac
 
   native-ios:
     name: Build production (ios)
@@ -272,6 +316,9 @@ jobs:
       EXPO_UPDATES_FINGERPRINT_OVERRIDE: \${{ needs.fingerprint.outputs.ios_hash }}
     needs: fingerprint
     if: needs.fingerprint.outputs.ios_native_exists != 'true'
+    concurrency:
+      group: rnw-production-ios
+      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -296,7 +343,25 @@ jobs:
       - name: Install JS dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Re-check native release tag
+        id: recheck
+        env:
+          RNW_TAG_PREFIX: rnw/native/production/ios
+          RNW_HASH: \${{ needs.fingerprint.outputs.ios_hash }}
+        run: |
+          set -euo pipefail
+          rc=0
+          git ls-remote --exit-code --tags origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" > /dev/null || rc=$?
+          case "$rc" in
+            0)
+              echo "::notice::Native release $RNW_TAG_PREFIX/$RNW_HASH already exists on origin; skipping build, upload and tag"
+              echo "exists=true" >> "$GITHUB_OUTPUT" ;;
+            2) echo "exists=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
+          esac
+
       - name: Run Fastlane lane production (ios)
+        if: steps.recheck.outputs.exists != 'true'
         run: bundle exec fastlane ios production
         env:
           APPLE_TEAM_ID: \${{ secrets.APPLE_TEAM_ID }}
@@ -310,9 +375,18 @@ jobs:
 
       - name: Tag native release
         id: tag
+        if: steps.recheck.outputs.exists != 'true'
         env:
           RNW_TAG_PREFIX: rnw/native/production/ios
           RNW_HASH: \${{ needs.fingerprint.outputs.ios_hash }}
-        run: git tag "$RNW_TAG_PREFIX/$RNW_HASH" && git push origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH"
+        run: |
+          set -euo pipefail
+          rc=0
+          git ls-remote --exit-code --tags origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" > /dev/null || rc=$?
+          case "$rc" in
+            0) echo "Tag $RNW_TAG_PREFIX/$RNW_HASH already on origin; nothing to push" ;;
+            2) git tag "$RNW_TAG_PREFIX/$RNW_HASH" && git push origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" ;;
+            *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
+          esac
 "
 `;

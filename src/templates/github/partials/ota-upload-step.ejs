@@ -1,6 +1,7 @@
 <%#
   POST bundle.zip to the OTA server. Every value reaches the shell via env;
-  --form-string keeps user strings literal (no curl @file / <file reads).
+  --form-string keeps user strings literal (no curl @file / <file reads);
+  the upload key goes through stdin so it never appears in curl's argv.
   Locals: otaServer, otaChannel, hashExpr (YAML-rendered values).
 -%>
       - name: Upload OTA update
@@ -13,11 +14,12 @@
           OTA_UPLOAD_KEY: ${{ secrets.OTA_UPLOAD_KEY }}
         run: |
           set -euo pipefail
-          curl --fail-with-body -sS -X POST "$RNW_OTA_SERVER/api/upload" \
+          printf '%s' "$OTA_UPLOAD_KEY" | curl --fail-with-body -sS --connect-timeout 30 --max-time 600 \
+            -X POST "$RNW_OTA_SERVER/api/upload" \
             -F "file=@bundle.zip" \
             --form-string "runtimeVersion=$RNW_HASH" \
             --form-string "channel=$RNW_CHANNEL" \
             --form-string "commitHash=$GITHUB_SHA" \
             --form-string "commitMessage=$RNW_COMMIT_MESSAGE" \
-            --form-string "uploadKey=$OTA_UPLOAD_KEY"
+            -F "uploadKey=<-"
 

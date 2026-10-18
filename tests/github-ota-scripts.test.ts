@@ -94,6 +94,21 @@ describe('fingerprint step', () => {
   });
 });
 
+describe('per-platform runtimeVersion collision guard', () => {
+  test('fails with a fingerprint-policy hint when ios and android resolve to the same value', async () => {
+    const step = getStep(content, 'fingerprint', 'fp-distinct');
+    const r = await runStep(step, { cwd: tmp(), env: { RNW_IOS_HASH: '1.0.0', RNW_ANDROID_HASH: '1.0.0' } });
+    expect(r.code).not.toBe(0);
+    expect(r.stdout + r.stderr).toContain('runtimeVersion: { policy: "fingerprint" }');
+  });
+
+  test('passes when the per-platform values differ', async () => {
+    const step = getStep(content, 'fingerprint', 'fp-distinct');
+    const r = await runStep(step, { cwd: tmp(), env: { RNW_IOS_HASH: IOS_HASH, RNW_ANDROID_HASH: ANDROID_HASH } });
+    expect(r.code).toBe(0);
+  });
+});
+
 describe('native release tag lookup + push', () => {
   function clonedRepo(): { origin: string; work: string } {
     const root = tmp();
@@ -135,6 +150,35 @@ describe('native release tag lookup + push', () => {
       env: { RNW_TAG_PREFIX: 'rnw/native/production/ios', RNW_HASH: IOS_HASH },
     });
     expect(r.outputs.exists).toBe('false');
+  });
+
+  test('native job re-check reports exists=true when another run tagged meanwhile', async () => {
+    const { work } = clonedRepo();
+    const env = { RNW_TAG_PREFIX: 'rnw/native/production/ios', RNW_HASH: IOS_HASH };
+    const recheck = getStep(content, 'native-ios', 'recheck');
+    expect((await runStep(recheck, { cwd: work, env })).outputs.exists).toBe('false');
+    git(work, 'tag', `rnw/native/production/ios/${IOS_HASH}`);
+    git(work, 'push', '-q', 'origin', '--tags');
+    git(work, 'tag', '-d', `rnw/native/production/ios/${IOS_HASH}`);
+    const r = await runStep(recheck, { cwd: work, env });
+    expect(r.code).toBe(0);
+    expect(r.outputs.exists).toBe('true');
+    expect(r.stdout).toContain('skipping');
+  });
+
+  test('tag push is a no-op success when the tag already exists on origin', async () => {
+    const { origin, work } = clonedRepo();
+    const env = { RNW_TAG_PREFIX: 'rnw/native/production/ios', RNW_HASH: IOS_HASH };
+    // Another run tagged a different commit first.
+    git(work, 'tag', `rnw/native/production/ios/${IOS_HASH}`);
+    git(work, 'push', '-q', 'origin', '--tags');
+    const tagged = git(origin, 'rev-parse', `refs/tags/rnw/native/production/ios/${IOS_HASH}`);
+    git(work, 'tag', '-d', `rnw/native/production/ios/${IOS_HASH}`);
+    writeFileSync(join(work, 'README'), 'y');
+    git(work, 'commit', '-q', '-am', 'second');
+    const r = await runStep(getStep(content, 'native-ios', 'tag'), { cwd: work, env });
+    expect(r.code).toBe(0);
+    expect(git(origin, 'rev-parse', `refs/tags/rnw/native/production/ios/${IOS_HASH}`)).toBe(tagged);
   });
 
   test('lookup fails (not "false") when origin is unreachable', async () => {
@@ -187,7 +231,7 @@ describe('package step', () => {
 });
 
 describe('upload step', () => {
-  async function upload(platform: 'ios' | 'android', status: number, env: Record<string, string>) {
+  async function upload(platform: 'ios' | 'android', status: number, env: Record<string, string>, pathDirs: string[] = []) {
     const received: Record<string, string> = {};
     let fileName = '';
     const server = Bun.serve({
@@ -215,6 +259,7 @@ describe('upload step', () => {
           GITHUB_SHA: 'abc123',
           ...env,
         },
+        pathDirs,
       });
       return { r, received, fileName };
     } finally {
@@ -234,6 +279,20 @@ describe('upload step', () => {
     expect(ios.received).toMatchObject({ runtimeVersion: IOS_HASH, channel: 'production', commitHash: 'abc123', uploadKey: 'test-key' });
     const android = await upload('android', 200, {});
     expect(android.received.runtimeVersion).toBe(ANDROID_HASH);
+  });
+
+  test('upload key never appears on the curl command line', async () => {
+    const bin = tmp();
+    const argvLog = join(bin, 'argv.log');
+    const realCurl = spawnSync('sh', ['-c', 'command -v curl'], { encoding: 'utf8' }).stdout.trim();
+    writeFileSync(join(bin, 'curl'), `#!/bin/sh\nprintf '%s\\n' "$@" >> "${argvLog}"\nexec "${realCurl}" "$@"\n`);
+    chmodSync(join(bin, 'curl'), 0o755);
+    const { r, received } = await upload('ios', 200, { OTA_UPLOAD_KEY: 's3cr3t-key-value' }, [bin]);
+    expect(r.code).toBe(0);
+    expect(received.uploadKey).toBe('s3cr3t-key-value');
+    const argv = readFileSync(argvLog, 'utf8');
+    expect(argv).toContain('/api/upload');
+    expect(argv).not.toContain('s3cr3t-key-value');
   });
 
   test('fails the step on HTTP 400 (bad upload key)', async () => {

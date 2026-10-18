@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { loadConfig } from '../src/config/parser';
 import { generateGithubActions } from '../src/generators/github-actions';
 import { legConcurrencyGroup, nativeTagPrefix } from '../src/generators/github-shared';
 import type { Config } from '../src/config/schema';
@@ -119,6 +122,62 @@ describe('smart (OTA) workflow shape', () => {
         if (step.run) expect({ id, run: step.run }).toEqual({ id, run: expect.not.stringContaining('${{') });
       }
     }
+  });
+
+  test('no `${{` inside any run: for every ota-* fixture × monorepo/bun variants', () => {
+    const dir = join(import.meta.dir, 'fixtures');
+    const names = readdirSync(dir).filter((f) => f.startsWith('ota-') && f.endsWith('.yml'));
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) {
+      const cfg = loadConfig(join(dir, name));
+      for (const opts of [{}, { appDir: 'apps/x', appSlug: 'x', packageManager: 'bun' as const }]) {
+        for (const file of generateGithubActions(cfg, opts)) {
+          for (const job of Object.values(parseWorkflow(file.content).jobs)) {
+            for (const step of job.steps) {
+              if (step.run) expect({ name, run: step.run }).toEqual({ name, run: expect.not.stringContaining('${{') });
+            }
+          }
+        }
+      }
+    }
+  });
+
+  test('native-<p> jobs share the leg concurrency group with ota-<p>, never cancelled', () => {
+    for (const p of ['ios', 'android'] as const) {
+      expect(wf.jobs[`native-${p}`]!.concurrency).toEqual({ group: `rnw-production-${p}`, 'cancel-in-progress': false });
+    }
+  });
+
+  test('native-<p> re-checks the tag right before fastlane and gates lane + tag on it', () => {
+    for (const p of ['ios', 'android'] as const) {
+      const steps = wf.jobs[`native-${p}`]!.steps;
+      const recheck = steps.findIndex((s) => s.id === 'recheck');
+      const fastlane = steps.findIndex((s) => s.run?.startsWith('bundle exec fastlane'));
+      expect(recheck).toBe(fastlane - 1);
+      expect(steps[recheck]!.env).toEqual({
+        RNW_TAG_PREFIX: `rnw/native/production/${p}`,
+        RNW_HASH: `\${{ needs.fingerprint.outputs.${p}_hash }}`,
+      });
+      const gate = "steps.recheck.outputs.exists != 'true'";
+      expect(steps[fastlane]!.if).toBe(gate);
+      expect(steps.find((s) => s.id === 'tag')!.if).toBe(gate);
+    }
+  });
+
+  test('fingerprint job fails on identical ios/android runtimeVersion only when both platforms are built', () => {
+    const step = wf.jobs.fingerprint!.steps.find((s) => s.id === 'fp-distinct')!;
+    expect(step.env).toEqual({
+      RNW_IOS_HASH: '${{ steps.fp-ios.outputs.hash }}',
+      RNW_ANDROID_HASH: '${{ steps.fp-android.outputs.hash }}',
+    });
+    const ios = parseWorkflow(generateGithubActions(iosOnlyConfig)[0]!.content);
+    expect(ios.jobs.fingerprint!.steps.find((s) => s.id === 'fp-distinct')).toBeUndefined();
+  });
+
+  test('upload has connect + total timeouts', () => {
+    const up = wf.jobs['ota-ios']!.steps.find((s) => s.id === 'upload')!;
+    expect(up.run).toContain('--connect-timeout 30');
+    expect(up.run).toContain('--max-time 600');
   });
 
   test('native-<p> jobs: gated, fingerprint override, contents: write, tag pushed after fastlane', () => {

@@ -110,6 +110,20 @@ jobs:
 <% for (const job of jobs) { -%>
 <%- include('partials/fingerprint-steps', { platform: job.platform, tagPrefix: job.tagPrefix }) -%>
 <% } -%>
+<% if (jobs.length > 1) { -%>
+      - name: Require distinct per-platform runtimeVersions
+        id: fp-distinct
+        env:
+          RNW_IOS_HASH: ${{ steps.fp-ios.outputs.hash }}
+          RNW_ANDROID_HASH: ${{ steps.fp-android.outputs.hash }}
+        run: |
+          set -euo pipefail
+          if [ "$RNW_IOS_HASH" = "$RNW_ANDROID_HASH" ]; then
+            echo "::error::ios and android resolved the same runtimeVersion ($RNW_IOS_HASH); per-platform OTA uploads would collide on the server. Use runtimeVersion: { policy: \"fingerprint\" } in app config"
+            exit 1
+          fi
+
+<% } -%>
 <% for (const job of jobs) { -%>
   ota-<%= job.platform %>:
     name: <%- yamlScalar(`OTA update ${job.lane} (${job.platform})`) %>
@@ -169,6 +183,9 @@ jobs:
       EXPO_UPDATES_FINGERPRINT_OVERRIDE: ${{ needs.fingerprint.outputs.<%= job.platform %>_hash }}
     needs: fingerprint
     if: needs.fingerprint.outputs.<%= job.platform %>_native_exists != 'true'
+    concurrency:
+      group: <%- job.concurrencyGroup %>
+      cancel-in-progress: false
 <% if (appDir) { -%>
     defaults:
       run:
@@ -226,7 +243,9 @@ jobs:
       - name: Install JS dependencies
         run: <%= packageManager === 'bun' ? 'bun install --frozen-lockfile' : packageManager === 'npm' ? 'npm ci' : 'yarn install --frozen-lockfile' %>
 
+<%- include('partials/native-recheck-step', { tagPrefix: job.tagPrefix, hashExpr: `\${{ needs.fingerprint.outputs.${job.platform}_hash }}` }) -%>
       - name: Run Fastlane lane <%= job.lane %> (<%= job.platform %>)
+        if: steps.recheck.outputs.exists != 'true'
         run: bundle exec fastlane <%= job.platform %> <%= job.lane %>
         env:
 <% for (const secret of job.secrets) { -%>
@@ -239,7 +258,7 @@ jobs:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"
 <% } -%>
 
-<%- include('partials/native-tag-step', { tagPrefix: job.tagPrefix, hashExpr: `\${{ needs.fingerprint.outputs.${job.platform}_hash }}` }) -%>
+<%- include('partials/native-tag-step', { ifExpr: "steps.recheck.outputs.exists != 'true'", tagPrefix: job.tagPrefix, hashExpr: `\${{ needs.fingerprint.outputs.${job.platform}_hash }}` }) -%>
 <% if (job !== jobs[jobs.length - 1]) { -%>
 
 <% } -%>

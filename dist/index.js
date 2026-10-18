@@ -148,6 +148,7 @@ var RUNNER_LABEL_SAFE = /^[A-Za-z0-9_.-]+$/;
 var RunnerLabelsSchema = z.array(z.string().regex(RUNNER_LABEL_SAFE, "runner labels may only contain letters, digits, dot, hyphen, underscore")).min(1);
 var CI_ENV_KEY_SAFE = /^[A-Z][A-Z0-9_]*$/;
 var CI_ENV_RESERVED_PREFIX = /^(RNW_|GITHUB_|RUNNER_|ACTIONS_)/;
+var CI_ENV_RESERVED_KEYS = ["EXPO_UPDATES_FINGERPRINT_OVERRIDE"];
 var CI_ENV_VALUE_SAFE = /^[A-Za-z0-9_.:/@+,=-]*$/;
 var CiEnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
   for (const [key, value] of Object.entries(env)) {
@@ -155,6 +156,8 @@ var CiEnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
       ctx.addIssue({ code: "custom", path: [key], message: `ci.env key "${key}" must match ${CI_ENV_KEY_SAFE}` });
     } else if (CI_ENV_RESERVED_PREFIX.test(key)) {
       ctx.addIssue({ code: "custom", path: [key], message: `ci.env key "${key}" uses a reserved prefix (RNW_, GITHUB_, RUNNER_, ACTIONS_)` });
+    } else if (CI_ENV_RESERVED_KEYS.includes(key)) {
+      ctx.addIssue({ code: "custom", path: [key], message: `ci.env key "${key}" is reserved (set by the generated workflow)` });
     } else if (ALL_SECRET_NAMES.includes(key)) {
       ctx.addIssue({ code: "custom", path: [key], message: `ci.env key "${key}" is a secret name; secrets must not be set as plain env` });
     }

@@ -39,3 +39,14 @@ jobs:
 
       - name: Check dist is up to date
         run: git diff --exit-code dist/
+
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" actionlint
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Lint generated workflows
+        run: bun scripts/lint-generated-workflows.ts

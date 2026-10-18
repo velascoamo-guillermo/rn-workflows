@@ -47,7 +47,7 @@ platform :android do
     upload_to_play_store(
       json_key_data: ENV["PLAY_STORE_JSON_KEY"],
       package_name: "<%- rubyString(packageName) %>",
-      track: "production",
+      track: "<%= profile.track %>",
       aab: "<%= profile.androidArtifactPath %>"
     )
 <% } -%>

@@ -1,4 +1,9 @@
-import type { Config, BuildProfile } from '../config/schema.ts';
+import {
+  resolveAndroidTrack,
+  type AndroidTrack,
+  type BuildProfile,
+  type Config,
+} from '../config/schema.ts';
 import { renderTemplate } from '../utils/render.ts';
 
 export interface GeneratedFile {
@@ -13,6 +18,7 @@ interface AndroidProfileView {
   gradleTask: 'assemble' | 'bundle';
   isAab: boolean;
   androidArtifactPath: string;
+  track: AndroidTrack;
 }
 
 interface IosProfileView {
@@ -81,6 +87,7 @@ function toAndroidView(name: string, profile: BuildProfile): AndroidProfileView 
     gradleTask: isAab ? 'bundle' : 'assemble',
     isAab,
     androidArtifactPath: artifactPath,
+    track: resolveAndroidTrack(profile),
   };
 }
 

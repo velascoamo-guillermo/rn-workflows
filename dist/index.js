@@ -1291,7 +1291,14 @@ function checkOtaReadiness(appDir, profileName, profile) {
   }
   if (!profile.e2e) {
     note(`Profile "${profileName}": OTA updates ship untested — add an e2e (Maestro) block to run flows against the staging channel before promotion.`);
-  } else if (e2ePlatforms(profile).includes("android")) {
+  } else {
+    const tested = e2ePlatforms(profile);
+    const shipped = E2E_PLATFORMS.filter((x) => profile.platform === "all" || profile.platform === x);
+    for (const p2 of shipped.filter((x) => !tested.includes(x))) {
+      note(`Profile "${profileName}": ${p2} OTA updates ship untested — e2e.maestro.platforms omits ${p2}, so its updates go straight to the production channel.`);
+    }
+  }
+  if (profile.e2e && e2ePlatforms(profile).includes("android")) {
     const host = hostOf(ota.server)?.replace(/:\d+$/, "");
     if (host && LOCAL_HOSTS.has(host)) {
       warn(`Profile "${profileName}": Android e2e runs on an emulator where localhost is the emulator itself, but ota.server is ${ota.server} — use a reachable hostname.`);

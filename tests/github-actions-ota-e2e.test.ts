@@ -10,7 +10,7 @@ import { loadConfig } from '../src/config/parser';
 import { generateGithubActions } from '../src/generators/github-actions';
 import { e2eCacheKey } from '../src/generators/github-shared';
 import type { Config } from '../src/config/schema';
-import { parseWorkflow, type WorkflowJob, type WorkflowStep } from './helpers/run-step';
+import { parseWorkflow, stepRuns, type WorkflowJob, type WorkflowStep } from './helpers/run-step';
 
 const fixture = (name: string): Config => loadConfig(join(import.meta.dir, 'fixtures', name));
 
@@ -39,6 +39,8 @@ const noE2eContent = generateGithubActions(noE2eCfg, { scheme: 'OtaAll' })[0]!.c
 const idx = (job: WorkflowJob, pred: (s: WorkflowStep) => boolean): number => job.steps.findIndex(pred);
 const byId = (id: string) => (s: WorkflowStep): boolean => s.id === id;
 const isFastlane = (s: WorkflowStep): boolean => s.run?.startsWith('bundle exec fastlane') ?? false;
+/** Native-release path of a native-<p> job: everything up to the tag re-check (excludes the recheck-hit OTA branch). */
+const nativePath = (job: WorkflowJob): WorkflowJob => ({ ...job, steps: job.steps.slice(0, idx(job, byId('recheck'))) });
 
 describe('e2eCacheKey', () => {
   test('rnw-e2e-[<slug>-]<profile>-<platform>-<stagingChannel>-<hash>', () => {
@@ -159,15 +161,15 @@ describe('native-<p> with e2e: binary → flows (no guard) → fastlane → tag'
       expect(idx(job, byId('recheck'))).toBe(fastlane - 1);
       expect(idx(job, byId('tag'))).toBeGreaterThan(fastlane);
       expect(job.steps.some(byId('guard-flow'))).toBe(false);
-      expect(JSON.stringify(job.steps)).not.toContain('rnw-assert-update');
-      expect(JSON.stringify(job.steps)).not.toContain('RNW_EXPECTED_UPDATE_ID');
+      expect(JSON.stringify(nativePath(job).steps)).not.toContain('rnw-assert-update');
+      expect(JSON.stringify(nativePath(job).steps)).not.toContain('RNW_EXPECTED_UPDATE_ID');
       expect(job.steps.find(byId('e2e-save'))!.with?.key).toBe(
         `rnw-e2e-production-${p}-staging-\${{ needs.fingerprint.outputs.${p}_hash }}`,
       );
     });
 
     test(`${p}: never restores the test-binary cache; builds unconditionally`, () => {
-      const job = all.jobs[`native-${p}`]!;
+      const job = nativePath(all.jobs[`native-${p}`]!);
       expect(job.steps.some(byId('e2e-cache'))).toBe(false);
       expect(job.steps.some((s) => s.uses?.startsWith('actions/cache/restore'))).toBe(false);
       expect(JSON.stringify(job.steps)).not.toContain('cache-hit');
@@ -248,5 +250,79 @@ describe('platform coverage', () => {
     expect(wf.jobs['ota-ios']!.steps.find(byId('e2e-cache'))!.with?.key).toBe(
       'rnw-e2e-x-production-ios-staging-${{ needs.fingerprint.outputs.ios_hash }}',
     );
+  });
+});
+
+describe('native-<p>: recheck hit ships this commit as an OTA instead of skipping (#54 M-1)', () => {
+  const running = (job: WorkflowJob, exists: string): string[] =>
+    job.steps.filter((s) => stepRuns(s, { steps: { recheck: { exists } } })).map((s) => s.id ?? s.name ?? '');
+  const ordered = (ran: string[], ids: string[]): void => {
+    const at = ids.map((id) => ran.indexOf(id));
+    expect({ ids, at: at.every((i) => i >= 0) }).toEqual({ ids, at: true });
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+  };
+  const noE2e = parseWorkflow(noE2eContent);
+  const step = (job: WorkflowJob, id: string): WorkflowStep => job.steps.find(byId(id))!;
+
+  for (const p of ['ios', 'android'] as const) {
+    test(`${p} e2e: hit → package → staging → binary (restore, else build) → guard → flows → promote; no fastlane/tag`, () => {
+      const job = all.jobs[`native-${p}`]!;
+      const ran = running(job, 'true');
+      expect(ran.some((id) => job.steps.find((s) => (s.id ?? s.name) === id && isFastlane(s)))).toBe(false);
+      expect(ran).not.toContain('tag');
+      ordered(ran, ['recheck', 'ota-update-id', 'ota-upload-staging', 'ota-e2e-cache', 'ota-e2e-build', 'ota-guard-flow', 'ota-maestro', 'ota-promote']);
+      expect(ran.at(-1)).toBe('ota-promote');
+      expect(step(job, 'ota-upload-staging').env?.RNW_CHANNEL).toBe('staging');
+      expect(step(job, 'ota-promote').env?.RNW_CHANNEL).toBe('production');
+      expect(step(job, 'ota-maestro').env?.RNW_EXPECTED_UPDATE_ID).toBe('${{ steps.ota-update-id.outputs.update_id }}');
+      expect(step(job, 'ota-e2e-cache').with?.key).toBe(`rnw-e2e-production-${p}-staging-\${{ needs.fingerprint.outputs.${p}_hash }}`);
+      const cached = job.steps
+        .filter((s) => stepRuns(s, { steps: { recheck: { exists: 'true' }, 'ota-e2e-cache': { 'cache-hit': 'true' } } }))
+        .map((s) => s.id);
+      expect(cached).toContain('ota-maestro');
+      expect(cached).not.toContain('ota-e2e-build');
+    });
+
+    test(`${p} e2e: miss path unchanged (fastlane + tag, no OTA steps)`, () => {
+      const job = all.jobs[`native-${p}`]!;
+      const ran = running(job, 'false');
+      expect(ran).toContain('tag');
+      expect(job.steps.filter((s) => stepRuns(s, { steps: { recheck: { exists: 'false' } } })).some(isFastlane)).toBe(true);
+      expect(ran.some((id) => id.startsWith('ota-'))).toBe(false);
+      ordered(ran, ['e2e-build', 'maestro', 'e2e-save', 'recheck', 'tag']);
+    });
+
+    test(`${p} e2e: OTA branch scripts byte-identical to ota-${p}`, () => {
+      const job = all.jobs[`native-${p}`]!;
+      const ota = all.jobs[`ota-${p}`]!;
+      for (const id of ['export', 'package', 'update-id', 'upload-staging', 'guard-flow', 'promote', 'e2e-build', 'e2e-patch']) {
+        expect({ id, run: step(job, `ota-${id}`).run }).toEqual({ id, run: step(ota, id).run });
+      }
+    });
+
+    test(`${p} no e2e: hit → package → upload to the channel; no fastlane/tag`, () => {
+      const job = noE2e.jobs[`native-${p}`]!;
+      const ran = running(job, 'true');
+      ordered(ran, ['recheck', 'ota-update-id', 'ota-upload']);
+      expect(ran).not.toContain('tag');
+      expect(job.steps.filter((s) => stepRuns(s, { steps: { recheck: { exists: 'true' } } })).some(isFastlane)).toBe(false);
+      expect(step(job, 'ota-upload').env?.RNW_CHANNEL).toBe('production');
+      expect(step(job, 'ota-upload').run).toBe(step(noE2e.jobs[`ota-${p}`]!, 'upload').run);
+      expect(running(job, 'false').some((id) => id.startsWith('ota-'))).toBe(false);
+    });
+  }
+
+  test('no always()/failure()/cancelled()/continue-on-error on the native jobs; step ids unique', () => {
+    for (const wf of [all, noE2e, selfHosted]) {
+      for (const [id, job] of Object.entries(wf.jobs)) {
+        if (!id.startsWith('native-')) continue;
+        for (const s of job.steps) {
+          expect(String(s.if ?? '')).not.toMatch(/always\(\)|failure\(\)|cancelled\(\)/);
+          expect((s as Record<string, unknown>)['continue-on-error']).toBeUndefined();
+        }
+        const ids = job.steps.map((s) => s.id).filter((x): x is string => x !== undefined);
+        expect(new Set(ids).size).toBe(ids.length);
+      }
+    }
   });
 });

@@ -1,11 +1,12 @@
 <%#
   Save the e2e test binary under its cache key. Locals: platform, e2e, restore
-  (true: skip when the restore step hit).
+  (true: skip when the restore step hit), idPrefix, gate.
 -%>
+<% const saveIf = joinIf(gate, restore && `steps.${idPrefix}e2e-cache.outputs.cache-hit != 'true'`); -%>
       - name: Save e2e test binary (<%= platform %>)
-        id: e2e-save
-<% if (restore) { -%>
-        if: steps.e2e-cache.outputs.cache-hit != 'true'
+        id: <%= idPrefix %>e2e-save
+<% if (saveIf) { -%>
+        if: <%- saveIf %>
 <% } -%>
         uses: actions/cache/save@v4
         with:

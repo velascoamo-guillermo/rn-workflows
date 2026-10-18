@@ -96,3 +96,33 @@ export async function runStep(step: WorkflowStep, opts: RunOptions): Promise<Run
   }
   return { code, stdout, stderr, rawOutput, outputs };
 }
+
+/** Runtime context for {@link stepRuns}: step outputs by step id, and matrix values. */
+export interface IfContext {
+  steps?: Record<string, Record<string, string>>;
+  matrix?: Record<string, unknown>;
+}
+
+/**
+ * Evaluates a step's `if:` (the subset generated workflows use: `steps.<id>.outputs.<k>`,
+ * `matrix.<k>`, string literals, `==`/`!=`, `!`, `&&`, `||`, parens) against `ctx`.
+ * No `if:` → runs (implicit success()). Status functions are rejected: generated
+ * release/promote paths must never use always()/failure()/cancelled().
+ */
+export function stepRuns(step: WorkflowStep, ctx: IfContext = {}): boolean {
+  if (step.if === undefined) return true;
+  let expr = String(step.if).trim();
+  const wrapped = /^\$\{\{([\s\S]*)\}\}$/.exec(expr);
+  if (wrapped) expr = wrapped[1]!.trim();
+  if (expr.includes('${{')) throw new Error(`partially wrapped if: ${step.if}`);
+  if (/\b(always|failure|cancelled|success)\s*\(/.test(expr)) throw new Error(`status function in if: ${step.if}`);
+  const js = expr
+    .replace(/steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)/g, (_m, id: string, key: string) => `__s(${JSON.stringify(id)}, ${JSON.stringify(key)})`)
+    .replace(/matrix\.([A-Za-z0-9_]+)/g, (_m, key: string) => `__m(${JSON.stringify(key)})`)
+    .replace(/==/g, '===')
+    .replace(/!===/g, '!==');
+  const s = (id: string, key: string): string => ctx.steps?.[id]?.[key] ?? '';
+  const m = (key: string): unknown => ctx.matrix?.[key] ?? '';
+  const fn = new Function('__s', '__m', `return (${js});`) as (a: typeof s, b: typeof m) => unknown;
+  return Boolean(fn(s, m));
+}

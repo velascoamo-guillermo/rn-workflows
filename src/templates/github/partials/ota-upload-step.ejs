@@ -3,10 +3,14 @@
   --form-string keeps user strings literal (no curl @file / <file reads);
   the upload key goes through stdin so it never appears in curl's argv.
   Locals: otaServer, otaChannel, hashExpr (YAML-rendered values); optional
-  stepId (default "upload") and stepName (default "Upload OTA update").
+  stepId (default "upload") and stepName (default "Upload OTA update");
+  gate (bare `if:` condition or '').
 -%>
       - name: <%- typeof stepName !== 'undefined' ? stepName : 'Upload OTA update' %>
         id: <%= typeof stepId !== 'undefined' ? stepId : 'upload' %>
+<% if (gate) { -%>
+        if: <%- gate %>
+<% } -%>
         env:
           RNW_OTA_SERVER: <%- otaServer %>
           RNW_CHANNEL: <%- otaChannel %>

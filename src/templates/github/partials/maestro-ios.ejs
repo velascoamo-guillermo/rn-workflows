@@ -2,11 +2,16 @@
   Maestro on an iOS simulator: pinned conditional install, boot + install the
   cached test binary, then (OTA path only) the update-id guard flow before the
   user's flows.
-  Locals: e2e (view from github-actions.ts), guard (bool), maestroVersion.
+  Locals: e2e (view from github-actions.ts), guard (bool), maestroVersion,
+  idPrefix (this partial's step ids), pkgPrefix (id prefix of the update-id
+  step), gate (bare `if:` condition or '').
 -%>
 <%- include('maestro-install-step') -%>
       - name: Boot simulator and install test binary
-        id: simulator
+        id: <%= idPrefix %>simulator
+<% if (gate) { -%>
+        if: <%- gate %>
+<% } -%>
 <% if (e2e.iosDevice) { -%>
         env:
           RNW_IOS_DEVICE: <%- e2e.iosDevice %>
@@ -26,13 +31,16 @@
 <%- include('guard-flow-step') -%>
 <% } -%>
       - name: Run Maestro flows (ios)
-        id: maestro
+        id: <%= idPrefix %>maestro
+<% if (gate) { -%>
+        if: <%- gate %>
+<% } -%>
         env:
-          RNW_UDID: ${{ steps.simulator.outputs.udid }}
+          RNW_UDID: ${{ steps.<%= idPrefix %>simulator.outputs.udid }}
           RNW_APP_ID: <%- e2e.appId %>
           RNW_FLOWS: <%- e2e.flows %>
 <% if (guard) { -%>
-          RNW_EXPECTED_UPDATE_ID: ${{ steps.update-id.outputs.update_id }}
+          RNW_EXPECTED_UPDATE_ID: ${{ steps.<%= pkgPrefix %>update-id.outputs.update_id }}
 <% } -%>
         run: |
           set -euo pipefail

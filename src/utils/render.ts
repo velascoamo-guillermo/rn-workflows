@@ -109,8 +109,17 @@ export function yamlSingleQuoted(value: string): string {
   return value.replace(/'/g, "''");
 }
 
+/**
+ * Joins GitHub Actions `if:` conditions with `&&`, dropping empty/false ones.
+ * Conditions must be bare expressions (no `${{ }}`): a partially wrapped `if:`
+ * is a string interpolation and always truthy. Returns '' when none remain.
+ */
+export function joinIf(...conditions: (string | false | undefined)[]): string {
+  return conditions.filter((c): c is string => typeof c === 'string' && c !== '').join(' && ');
+}
+
 export function renderTemplate(relPath: string, data: Record<string, unknown>): string {
   const tpl = resolveTemplate(relPath);
-  const helpers = { rubyString, rubySymbol, yamlScalar, yamlSingleQuoted };
+  const helpers = { rubyString, rubySymbol, yamlScalar, yamlSingleQuoted, joinIf };
   return ejs.render(tpl.source, { ...helpers, ...data }, { rmWhitespace: false, filename: tpl.path });
 }

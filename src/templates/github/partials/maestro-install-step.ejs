@@ -1,10 +1,13 @@
 <%#
   Pinned, conditional Maestro install: reuse a maestro already on PATH or in
   ~/.maestro (self-hosted runners), else the official installer pinned via
-  MAESTRO_VERSION. Locals: maestroVersion.
+  MAESTRO_VERSION. Locals: maestroVersion, idPrefix, gate.
 -%>
       - name: Install Maestro
-        id: maestro-install
+        id: <%= idPrefix %>maestro-install
+<% if (gate) { -%>
+        if: <%- gate %>
+<% } -%>
         env:
           MAESTRO_VERSION: <%- maestroVersion %>
         run: |

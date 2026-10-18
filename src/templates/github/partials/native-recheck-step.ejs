@@ -18,7 +18,7 @@
           git ls-remote --exit-code --tags origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" > /dev/null || rc=$?
           case "$rc" in
             0)
-              echo "::notice::Native release $RNW_TAG_PREFIX/$RNW_HASH already exists on origin; skipping build, upload and tag"
+              echo "::notice::Native release $RNW_TAG_PREFIX/$RNW_HASH already exists on origin; shipping this commit as an OTA update instead of a store build"
               echo "exists=true" >> "$GITHUB_OUTPUT" ;;
             2) echo "exists=false" >> "$GITHUB_OUTPUT" ;;
             *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;

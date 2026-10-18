@@ -20,7 +20,8 @@ import {
   type MatrixWorkflowOptions,
 } from '../src/generators/github-matrix';
 import { e2eCacheKey } from '../src/generators/github-shared';
-import { getStep, parseWorkflow, runStep, type WorkflowJob } from './helpers/run-step';
+import { generateGithubActions } from '../src/generators/github-actions';
+import { getStep, parseWorkflow, runStep, stepRuns, type IfContext, type WorkflowJob, type WorkflowStep } from './helpers/run-step';
 
 const fixtures = resolve(import.meta.dir, 'fixtures');
 const otaAll = loadConfig(join(fixtures, 'ota-e2e-all.yml'));
@@ -51,6 +52,7 @@ interface Leg {
   paths: string[];
   branch: string;
   env: string;
+  appId: string;
   hash?: string;
 }
 
@@ -579,6 +581,205 @@ describe('plan route step (fingerprint routing)', () => {
       const r = await runRoute(ws, all.filter((l) => l.app === 'beta'));
       expect(r.code).not.toBe(0);
       expect(r.rawOutput).not.toContain('ota=');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #54: staging + Maestro e2e + auto-promote in the ota / native legs
+// ---------------------------------------------------------------------------
+
+describe('matrix e2e legs (#54)', () => {
+  const content = render();
+  const ota = job(content, 'ota');
+  const native = job(content, 'native');
+  const smart = parseWorkflow(generateGithubActions(otaAll, { scheme: 'Alpha' })[0]!.content);
+  const smartNoE2e = parseWorkflow(
+    generateGithubActions({ ...otaAll, build: { production: { ...otaAll.build.production!, e2e: undefined } } }, { scheme: 'Alpha' })[0]!
+      .content,
+  );
+  const selfHostedContent = render([{ dir: 'apps/solo', slug: 'solo', config: otaIosSelfHosted }]);
+
+  const ix = (j: WorkflowJob, id: string): number => j.steps.findIndex((s) => s.id === id);
+  const step = (j: WorkflowJob, id: string): WorkflowStep => {
+    const s = j.steps.find((x) => x.id === id);
+    if (!s) throw new Error(`step ${id} missing`);
+    return s;
+  };
+  const leg = (platform: 'ios' | 'android', e2e: boolean, selfHosted = false): Record<string, unknown> => ({
+    platform,
+    e2e,
+    ota: true,
+    selfHosted,
+  });
+  const running = (j: WorkflowJob, ctx: IfContext): string[] =>
+    j.steps.filter((s) => stepRuns(s, ctx)).map((s) => s.id ?? s.name ?? '');
+
+  test('legs carry the Maestro appId (ios bundleId, android packageName); empty without e2e', () => {
+    const all = legs(content);
+    expect(all.find((l) => l.app === 'alpha' && l.platform === 'ios')!.appId).toBe('com.example.otaall');
+    expect(all.find((l) => l.app === 'alpha' && l.platform === 'android')!.appId).toBe('com.example.otaall');
+    expect(all.find((l) => l.app === 'beta')!.appId).toBe('');
+  });
+
+  for (const p of ['ios', 'android'] as const) {
+    test(`ota ${p} e2e leg: package → upload(staging) → binary → guard → flows → promote`, () => {
+      const ran = running(ota, { matrix: leg(p, true) });
+      const order = ['update-id', 'upload-staging', `${p}-e2e-build`, `${p}-guard-flow`, `${p}-maestro`, 'promote'];
+      const at = order.map((id) => ran.indexOf(id));
+      expect(at.every((i) => i >= 0)).toBe(true);
+      expect([...at].sort((a, b) => a - b)).toEqual(at);
+      expect(ran.at(-1)).toBe('promote');
+      expect(ran).not.toContain('upload');
+      const other = p === 'ios' ? 'android' : 'ios';
+      expect(ran.some((id) => id.startsWith(`${other}-`))).toBe(false);
+    });
+
+    test(`ota ${p}: channels, cache key, update id and appId come from the leg`, () => {
+      expect(step(ota, 'upload-staging').env?.['RNW_CHANNEL']).toBe('${{ matrix.stagingChannel }}');
+      expect(step(ota, 'promote').env?.['RNW_CHANNEL']).toBe('${{ matrix.otaChannel }}');
+      for (const id of ['upload-staging', 'promote']) expect(step(ota, id).env?.['RNW_HASH']).toBe('${{ matrix.hash }}');
+      expect(step(ota, `${p}-e2e-cache`).with?.['key']).toBe('${{ matrix.e2eCachePrefix }}${{ matrix.hash }}');
+      expect(step(ota, `${p}-e2e-build`).env?.['EXPO_UPDATES_FINGERPRINT_OVERRIDE']).toBe('${{ matrix.hash }}');
+      expect(step(ota, `${p}-e2e-patch`).env?.['RNW_STAGING_CHANNEL']).toBe('${{ matrix.stagingChannel }}');
+      const maestro = step(ota, `${p}-maestro`);
+      expect(maestro.env?.['RNW_EXPECTED_UPDATE_ID']).toBe('${{ steps.update-id.outputs.update_id }}');
+      expect(maestro.env?.['RNW_APP_ID']).toBe('${{ matrix.appId }}');
+      expect(maestro.env?.['RNW_FLOWS']).toBe('${{ matrix.flows }}');
+    });
+
+    test(`ota ${p}: cached test binary skips the build`, () => {
+      const ran = running(ota, { matrix: leg(p, true), steps: { [`${p}-e2e-cache`]: { 'cache-hit': 'true' } } });
+      expect(ran).toContain(`${p}-e2e-cache`);
+      expect(ran).not.toContain(`${p}-e2e-build`);
+      expect(ran).toContain(`${p}-maestro`);
+    });
+
+    test(`ota ${p} leg without e2e uploads straight to the channel`, () => {
+      const ran = running(ota, { matrix: leg(p, false) });
+      expect(ran).toContain('upload');
+      for (const id of ['upload-staging', 'promote', `${p}-maestro`, `${p}-e2e-build`]) expect(ran).not.toContain(id);
+    });
+
+    test(`native ${p} e2e leg: fresh binary → flows (no guard) → save → recheck → fastlane → tag`, () => {
+      const ran = running(native, { matrix: leg(p, true), steps: { recheck: { exists: 'false' } } });
+      const order = [`${p}-e2e-build`, `${p}-maestro`, `${p}-e2e-save`, 'recheck', 'fastlane', 'tag'];
+      const at = order.map((id) => ran.indexOf(id));
+      expect(at.every((i) => i >= 0)).toBe(true);
+      expect([...at].sort((a, b) => a - b)).toEqual(at);
+      expect(ran.some((id) => id.startsWith('ota-'))).toBe(false);
+      expect(native.steps.some((s) => s.id === `${p}-e2e-cache`)).toBe(false);
+      expect(native.steps.some((s) => s.id === `${p}-guard-flow`)).toBe(false);
+      expect(step(native, `${p}-maestro`).env?.['RNW_EXPECTED_UPDATE_ID']).toBeUndefined();
+    });
+
+    test(`native ${p}: recheck hit ships this commit as an OTA (staging → e2e → promote), no fastlane/tag`, () => {
+      const ran = running(native, { matrix: leg(p, true), steps: { recheck: { exists: 'true' } } });
+      expect(ran).not.toContain('fastlane');
+      expect(ran).not.toContain('tag');
+      const order = ['ota-update-id', 'ota-upload-staging', `ota-${p}-e2e-cache`, `ota-${p}-e2e-build`, `ota-${p}-guard-flow`, `ota-${p}-maestro`, 'ota-promote'];
+      const at = order.map((id) => ran.indexOf(id));
+      expect(at.every((i) => i >= 0)).toBe(true);
+      expect([...at].sort((a, b) => a - b)).toEqual(at);
+      expect(ran.at(-1)).toBe('ota-promote');
+      expect(ran).not.toContain('ota-upload');
+      expect(step(native, `ota-${p}-maestro`).env?.['RNW_EXPECTED_UPDATE_ID']).toBe('${{ steps.ota-update-id.outputs.update_id }}');
+      expect(step(native, `ota-${p}-e2e-cache`).with?.['key']).toBe('${{ matrix.e2eCachePrefix }}${{ matrix.hash }}');
+      expect(step(native, 'ota-upload-staging').env?.['RNW_CHANNEL']).toBe('${{ matrix.stagingChannel }}');
+      expect(step(native, 'ota-promote').env?.['RNW_CHANNEL']).toBe('${{ matrix.otaChannel }}');
+    });
+
+    test(`native ${p}: recheck hit without e2e uploads straight to the channel`, () => {
+      const ran = running(native, { matrix: leg(p, false), steps: { recheck: { exists: 'true' } } });
+      expect(ran).toContain('ota-upload');
+      expect(ran.indexOf('ota-upload')).toBeGreaterThan(ran.indexOf('ota-update-id'));
+      for (const id of ['fastlane', 'tag', 'ota-upload-staging', 'ota-promote', `ota-${p}-maestro`]) expect(ran).not.toContain(id);
+      expect(step(native, 'ota-upload').env?.['RNW_CHANNEL']).toBe('${{ matrix.otaChannel }}');
+    });
+  }
+
+  test('native non-ota leg: no recheck, no OTA fallback, fastlane + no tag', () => {
+    const ran = running(native, { matrix: { platform: 'android', e2e: false, ota: false, selfHosted: false } });
+    expect(ran).toContain('fastlane');
+    expect(ran.some((id) => id.startsWith('ota-') || id === 'recheck' || id === 'tag')).toBe(false);
+  });
+
+  test('upload / update-id / guard / promote scripts are byte-identical to the smart workflow', () => {
+    const sIos = smart.jobs['ota-ios']!;
+    const sAndroid = smart.jobs['ota-android']!;
+    const pairs: [WorkflowStep, WorkflowStep][] = [
+      [step(sIos, 'update-id'), step(ota, 'update-id')],
+      [step(sIos, 'package'), step(ota, 'package')],
+      [step(sIos, 'upload-staging'), step(ota, 'upload-staging')],
+      [step(sIos, 'promote'), step(ota, 'promote')],
+      [step(sIos, 'guard-flow'), step(ota, 'ios-guard-flow')],
+      [step(sAndroid, 'guard-flow'), step(ota, 'android-guard-flow')],
+      [step(sIos, 'maestro'), step(ota, 'ios-maestro')],
+      [step(sAndroid, 'maestro-script'), step(ota, 'android-maestro-script')],
+      [step(smartNoE2e.jobs['ota-ios']!, 'upload'), step(ota, 'upload')],
+      [step(sIos, 'update-id'), step(native, 'ota-update-id')],
+      [step(sIos, 'upload-staging'), step(native, 'ota-upload-staging')],
+      [step(sIos, 'promote'), step(native, 'ota-promote')],
+      [step(sIos, 'guard-flow'), step(native, 'ota-ios-guard-flow')],
+      [step(sIos, 'maestro'), step(native, 'ota-ios-maestro')],
+    ];
+    for (const [a, b] of pairs) {
+      expect({ id: b.id, run: b.run }).toEqual({ id: b.id, run: a.run });
+    }
+  });
+
+  test('ios: simctl UDID boot + install; device name from the leg', () => {
+    const sim = step(ota, 'ios-simulator');
+    expect(sim.run).toContain('xcrun simctl install "$UDID"');
+    expect(sim.env?.['RNW_IOS_DEVICE']).toBe('${{ matrix.iosDevice }}');
+    expect(step(ota, 'ios-maestro').env?.['RNW_UDID']).toBe('${{ steps.ios-simulator.outputs.udid }}');
+    expect(step(native, 'ota-ios-maestro').env?.['RNW_UDID']).toBe('${{ steps.ota-ios-simulator.outputs.udid }}');
+  });
+
+  test('android: pinned emulator runner in the leg dir, KVM only on hosted runners', () => {
+    for (const [j, prefix] of [[ota, 'android-'], [native, 'android-'], [native, 'ota-android-']] as const) {
+      const emu = step(j, `${prefix}maestro`);
+      expect(emu.uses).toBe('reactivecircus/android-emulator-runner@v2.38.0');
+      expect(emu.with?.['working-directory']).toBe('${{ matrix.dir }}');
+      expect(String(emu.with?.['script'])).not.toContain('${{');
+    }
+    const kvm = ota.steps.find((s) => s.name === 'Enable KVM')!;
+    expect(stepRuns(kvm, { matrix: leg('android', true) })).toBe(true);
+    expect(stepRuns(kvm, { matrix: leg('android', true, true) })).toBe(false);
+    expect(stepRuns(kvm, { matrix: leg('ios', true) })).toBe(false);
+  });
+
+  test('self-hosted ios leg: no setup-xcode in ota, Maestro install conditional', () => {
+    const shOta = job(selfHostedContent, 'ota');
+    const xcode = shOta.steps.find((s) => s.uses?.startsWith('maxim-lobanov/setup-xcode'))!;
+    expect(stepRuns(xcode, { matrix: leg('ios', true, true) })).toBe(false);
+    expect(stepRuns(xcode, { matrix: leg('ios', true, false) })).toBe(true);
+    expect(stepRuns(xcode, { matrix: leg('ios', false, false) })).toBe(false);
+    const ran = running(shOta, { matrix: leg('ios', true, true) });
+    expect(ran).toContain('ios-maestro-install');
+    expect(step(shOta, 'ios-maestro-install').run).toContain('command -v maestro');
+    expect(selfHostedContent.toLowerCase()).not.toContain('android');
+  });
+
+  test('hosted ota android e2e leg sets up the JDK before building', () => {
+    const jdk = ota.steps.findIndex((s) => s.uses?.startsWith('actions/setup-java') && stepRuns(s, { matrix: leg('android', true) }));
+    expect(jdk).toBeGreaterThan(-1);
+    expect(jdk).toBeLessThan(ix(ota, 'android-e2e-build'));
+  });
+
+  test('no always()/failure()/cancelled()/continue-on-error on the ota or native step paths', () => {
+    for (const j of [ota, native]) {
+      for (const s of j.steps) {
+        expect(String(s.if ?? '')).not.toMatch(/always\(\)|failure\(\)|cancelled\(\)/);
+        expect((s as Record<string, unknown>)['continue-on-error']).toBeUndefined();
+      }
+    }
+  });
+
+  test('every step id is unique per job', () => {
+    for (const j of [ota, native]) {
+      const ids = j.steps.map((s) => s.id).filter((id): id is string => id !== undefined);
+      expect(new Set(ids).size).toBe(ids.length);
     }
   });
 });

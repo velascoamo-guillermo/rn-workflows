@@ -1,6 +1,7 @@
 import type { Config } from '../config/schema.ts';
-import { renderTemplate } from '../utils/render.ts';
+import { renderTemplate, yamlScalar } from '../utils/render.ts';
 import { platformsFor, secretsFor } from '../secrets.ts';
+import { isSelfHosted, renderRunsOn, runsOnFor } from './github-shared.ts';
 import type { GeneratedFile } from './fastlane.ts';
 
 const DEFAULT_BRANCH: Record<string, string> = {
@@ -50,14 +51,23 @@ export function generateGithubActions(
 
   for (const [name, profile] of Object.entries(config.build)) {
     const platforms = platformsFor(profile.platform);
-    const jobs = platforms.map((platform) => ({
-      id: `build-${platform}`,
-      name: `Build ${name} (${platform})`,
-      platform,
-      lane: name,
-      runsOn: platform === 'ios' ? 'macos-latest' : 'ubuntu-latest',
-      secrets: secretsFor(platform, profile.distribution),
+    const jobEnv = Object.entries(config.env ?? {}).map(([key, value]) => ({
+      key,
+      value: yamlScalar(value),
     }));
+    const jobs = platforms.map((platform) => {
+      const runsOn = runsOnFor(config, platform);
+      return {
+        id: `build-${platform}`,
+        name: `Build ${name} (${platform})`,
+        platform,
+        lane: name,
+        runsOn: renderRunsOn(runsOn),
+        selfHosted: isSelfHosted(runsOn),
+        env: jobEnv,
+        secrets: secretsFor(platform, profile.distribution),
+      };
+    });
 
     const checks = config.checks ?? {};
     const hasChecks = checks.test || checks.lint || checks.typecheck;

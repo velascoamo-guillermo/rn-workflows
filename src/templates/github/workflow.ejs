@@ -68,7 +68,13 @@ jobs:
 <% for (const job of jobs) { -%>
   <%= job.id %>:
     name: <%- yamlScalar(job.name) %>
-    runs-on: <%= job.runsOn %>
+    runs-on: <%- job.runsOn %>
+<% if (job.env.length > 0) { -%>
+    env:
+<% for (const e of job.env) { -%>
+      <%= e.key %>: <%- e.value %>
+<% } -%>
+<% } -%>
 <% if (hasChecks) { -%>
     needs: quality
 <% } -%>
@@ -97,6 +103,11 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
 <% } -%>
+<% if (job.selfHosted) { -%>
+      - name: Install Ruby dependencies
+        run: bundle install
+
+<% } else { -%>
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
@@ -106,7 +117,8 @@ jobs:
           working-directory: <%- yamlScalar(appDir) %>
 <% } -%>
 
-<% if (job.platform === 'ios') { -%>
+<% } -%>
+<% if (job.platform === 'ios' && !job.selfHosted) { -%>
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:

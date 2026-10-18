@@ -740,6 +740,23 @@ function generateFastlane(config, options = {}) {
   return files;
 }
 
+// src/generators/github-shared.ts
+var DEFAULTS = {
+  ios: "macos-latest",
+  android: "ubuntu-latest"
+};
+function runsOnFor(config, platform) {
+  return config.runners?.[platform] ?? DEFAULTS[platform];
+}
+function isSelfHosted(runsOn) {
+  return Array.isArray(runsOn) && runsOn.includes("self-hosted");
+}
+function renderRunsOn(runsOn) {
+  if (typeof runsOn === "string")
+    return yamlScalar(runsOn);
+  return `[${runsOn.map(yamlScalar).join(", ")}]`;
+}
+
 // src/generators/github-actions.ts
 var DEFAULT_BRANCH = {
   preview: "develop",
@@ -759,14 +776,23 @@ function generateGithubActions(config, options = {}) {
   const files = [];
   for (const [name, profile] of Object.entries(config.build)) {
     const platforms = platformsFor(profile.platform);
-    const jobs = platforms.map((platform) => ({
-      id: `build-${platform}`,
-      name: `Build ${name} (${platform})`,
-      platform,
-      lane: name,
-      runsOn: platform === "ios" ? "macos-latest" : "ubuntu-latest",
-      secrets: secretsFor(platform, profile.distribution)
+    const jobEnv = Object.entries(config.env ?? {}).map(([key, value]) => ({
+      key,
+      value: yamlScalar(value)
     }));
+    const jobs = platforms.map((platform) => {
+      const runsOn = runsOnFor(config, platform);
+      return {
+        id: `build-${platform}`,
+        name: `Build ${name} (${platform})`,
+        platform,
+        lane: name,
+        runsOn: renderRunsOn(runsOn),
+        selfHosted: isSelfHosted(runsOn),
+        env: jobEnv,
+        secrets: secretsFor(platform, profile.distribution)
+      };
+    });
     const checks = config.checks ?? {};
     const hasChecks = checks.test || checks.lint || checks.typecheck;
     const filename = `rn-${slugPrefix}${name}.yml`;
@@ -855,12 +881,14 @@ function generateMatrixWorkflow(apps, options = {}) {
         for (const secret of secretsFor(platform, profile.distribution)) {
           secretUnion.add(secret);
         }
+        const runsOn = runsOnFor(app.config, platform);
         releaseLegs.push({
           app: app.slug,
           dir: legDir(app.dir),
           profile: profileName,
           platform,
-          runsOn: platform === "ios" ? "macos-latest" : "ubuntu-latest",
+          runsOn,
+          selfHosted: isSelfHosted(runsOn),
           ota: hasOtaProfile,
           otaUpload: hasOtaProfile && platform === uploadPlatform,
           otaServer: profile.ota?.server ?? "",
@@ -871,12 +899,15 @@ function generateMatrixWorkflow(apps, options = {}) {
   }
   const secrets = [...secretUnion].sort();
   const hasOta = releaseLegs.some((leg) => leg.ota);
+  const hasSelfHosted = releaseLegs.some((leg) => leg.selfHosted);
+  const emittedLegs = hasSelfHosted ? releaseLegs : releaseLegs.map(({ selfHosted: _selfHosted, ...rest }) => rest);
   const content = renderTemplate("github/workflow-matrix.ejs", {
     packageManager,
     qualityLegsJson: JSON.stringify(qualityLegs),
-    releaseLegsJson: JSON.stringify(releaseLegs),
+    releaseLegsJson: JSON.stringify(emittedLegs),
     hasQuality: qualityLegs.length > 0,
     hasOta,
+    hasSelfHosted,
     secrets,
     matchAuth: hasIos && secrets.includes("MATCH_PASSWORD")
   });

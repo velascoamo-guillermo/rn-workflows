@@ -161,8 +161,16 @@ jobs:
 
 <% } -%>
 <% const skipHit = hasOta ? " && steps.fp-cache.outputs.cache-hit != 'true'" : ''; -%>
+<% if (hasSelfHosted) { -%>
+      - name: Install Ruby dependencies
+        if: ${{ matrix.selfHosted<%- skipHit %> }}
+        run: bundle install
+
+<% } -%>
       - name: Setup Ruby
-<% if (hasOta) { -%>
+<% if (hasSelfHosted) { -%>
+        if: ${{ !matrix.selfHosted<%- skipHit %> }}
+<% } else if (hasOta) { -%>
         if: ${{ steps.fp-cache.outputs.cache-hit != 'true' }}
 <% } -%>
         uses: ruby/setup-ruby@v1
@@ -172,7 +180,7 @@ jobs:
           working-directory: ${{ matrix.dir }}
 
       - name: Select Xcode
-        if: ${{ matrix.platform == 'ios'<%- skipHit %> }}
+        if: ${{ matrix.platform == 'ios'<%- hasSelfHosted ? ' && !matrix.selfHosted' : '' %><%- skipHit %> }}
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable

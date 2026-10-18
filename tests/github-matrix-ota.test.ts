@@ -355,6 +355,30 @@ describe('plan select step (change detection)', () => {
     expect(r.outputs['has_ota']).toBe('true');
   });
 
+  test('a non-ASCII filename under an app dir selects that app', async () => {
+    const { dir, base } = repo();
+    commitFile(dir, 'apps/beta/assets/caf\u00e9-\u00f1and\u00fa.png');
+    expect((await runSelect(dir, { RNW_BEFORE: base })).keys).toEqual(['beta/android']);
+  });
+
+  test('a rename across apps selects both the source and the destination app', async () => {
+    const { dir } = repo();
+    commitFile(dir, 'apps/alpha/src/shared.ts', 'export const a = 1;\nexport const b = 2;\nexport const c = 3;');
+    const before = git(dir, 'rev-parse', 'HEAD');
+    mkdirSync(join(dir, 'apps', 'beta', 'src'), { recursive: true });
+    git(dir, 'mv', 'apps/alpha/src/shared.ts', 'apps/beta/src/shared.ts');
+    git(dir, 'commit', '-q', '-m', 'move');
+    const { keys } = await runSelect(dir, { RNW_BEFORE: before });
+    expect(keys).toEqual(['alpha/android', 'alpha/ios', 'beta/android']);
+  });
+
+  test('app dir prefixes do not leak into sibling dirs sharing a name prefix', async () => {
+    const { dir, base } = repo();
+    commitFile(dir, 'apps/betamax/index.ts');
+    commitFile(dir, 'apps/alpha-old/index.ts');
+    expect((await runSelect(dir, { RNW_BEFORE: base })).keys).toEqual([]);
+  });
+
   test('a change under a shared extraPath selects every app that declares it', async () => {
     const { dir, base } = repo();
     commitFile(dir, 'packages/kit/index.ts');

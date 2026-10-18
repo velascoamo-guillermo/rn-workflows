@@ -222,11 +222,13 @@ jobs:
               echo "::notice::No usable push base ($RNW_BEFORE); selecting every OTA leg on $GITHUB_REF_NAME"
               ALL=true
             else
-              git diff --name-only "$RNW_BEFORE" "$GITHUB_SHA" > "$CHANGED_FILE"
+              # NUL-separated raw paths (no octal quoting of non-ASCII); --no-renames
+              # lists both sides of a move so the source app is selected too.
+              git -c core.quotePath=false diff --no-renames --name-only -z "$RNW_BEFORE" "$GITHUB_SHA" > "$CHANGED_FILE"
               ALL=false
             fi
             SELECTED=$(jq -c --arg branch "$GITHUB_REF_NAME" --argjson all "$ALL" --rawfile changed "$CHANGED_FILE" '
-              ($changed | split("\n") | map(select(length > 0))) as $files
+              ($changed | split("\u0000") | map(select(length > 0))) as $files
               | [.[] | select(.ota and .branch == $branch)
                 | select($all or ([.paths[] as $p | $files[] | select($p == "" or startswith($p))] | length > 0))]
             ' <<< "$RELEASE_LEGS")

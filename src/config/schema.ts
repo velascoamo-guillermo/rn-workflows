@@ -229,7 +229,18 @@ const RunnerLabelsSchema = z
 const CI_ENV_KEY_SAFE = /^[A-Z][A-Z0-9_]*$/;
 const CI_ENV_RESERVED_PREFIX = /^(RNW_|GITHUB_|RUNNER_|ACTIONS_)/;
 /** Keys the generated workflows set themselves (would collide in a job's `env:`). */
-const CI_ENV_RESERVED_KEYS: readonly string[] = ['EXPO_UPDATES_FINGERPRINT_OVERRIDE'];
+const CI_ENV_RESERVED_KEYS: readonly string[] = [
+  'EXPO_UPDATES_FINGERPRINT_OVERRIDE',
+  // Exported to $GITHUB_ENV, these would hijack every later step's process.
+  'BASH_ENV',
+  'ENV',
+  'NODE_OPTIONS',
+  'PATH',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+];
+/** Dynamic-loader injection on macOS runners (DYLD_INSERT_LIBRARIES etc.). */
+const CI_ENV_RESERVED_KEY_PREFIX = /^DYLD_/;
 const CI_ENV_VALUE_SAFE = /^[A-Za-z0-9_.:/@+,=-]*$/;
 
 const CiEnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
@@ -238,8 +249,8 @@ const CiEnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
       ctx.addIssue({ code: 'custom', path: [key], message: `ci.env key "${key}" must match ${CI_ENV_KEY_SAFE}` });
     } else if (CI_ENV_RESERVED_PREFIX.test(key)) {
       ctx.addIssue({ code: 'custom', path: [key], message: `ci.env key "${key}" uses a reserved prefix (RNW_, GITHUB_, RUNNER_, ACTIONS_)` });
-    } else if (CI_ENV_RESERVED_KEYS.includes(key)) {
-      ctx.addIssue({ code: 'custom', path: [key], message: `ci.env key "${key}" is reserved (set by the generated workflow)` });
+    } else if (CI_ENV_RESERVED_KEYS.includes(key) || CI_ENV_RESERVED_KEY_PREFIX.test(key)) {
+      ctx.addIssue({ code: 'custom', path: [key], message: `ci.env key "${key}" is reserved (set by the generated workflow, or would hijack later processes)` });
     } else if ((ALL_SECRET_NAMES as readonly string[]).includes(key)) {
       ctx.addIssue({ code: 'custom', path: [key], message: `ci.env key "${key}" is a secret name; secrets must not be set as plain env` });
     }

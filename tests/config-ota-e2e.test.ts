@@ -151,6 +151,13 @@ describe('ci.runners / ci.env', () => {
       parseConfig(cfg({ ota: false, ci: ci('  env:\n    EXPO_UPDATES_FINGERPRINT_OVERRIDE: x\n') })),
     ).toThrow(/reserved/);
   });
+  for (const key of ['BASH_ENV', 'ENV', 'NODE_OPTIONS', 'PATH', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES', 'DYLD_FOO']) {
+    it(`rejects process-hijacking env key ${key}`, () => {
+      expect(() =>
+        parseConfig(cfg({ ota: false, ci: ci(`  env:\n    ${key}: x\n`) })),
+      ).toThrow(/reserved/);
+    });
+  }
   for (const val of ['"a\\nb"', '"a\'b"', '"a\\"b"', '"$X"', '"a b"']) {
     it(`rejects env value ${val}`, () => {
       expect(() =>

@@ -31,6 +31,10 @@ interface IosProfileView {
   codeSignIdentity: string;
   xcWorkspace: string;
   xcScheme: string;
+  /** TestFlight upload. With `ota`, a `store` target lands here too. */
+  uploadToTestflight: boolean;
+  /** App Store submission. Never with `ota`: the native path stops at TestFlight. */
+  uploadToAppStore: boolean;
 }
 
 type MatchType = 'appstore' | 'adhoc' | 'development';
@@ -100,6 +104,8 @@ function toIosView(
   const exportMethod = profile.ios?.exportMethod ?? 'app-store';
   const targets = profile.distribution.split('+').map((s) => s.trim());
   const matchType = matchTypeFor(exportMethod);
+  const hasOta = profile.ota !== undefined;
+  const wantsStore = targets.includes('store');
   return {
     name,
     description: `Build ${name} (ios)`,
@@ -110,6 +116,8 @@ function toIosView(
     codeSignIdentity: CODE_SIGN_IDENTITY[matchType],
     xcWorkspace: scheme,
     xcScheme: scheme,
+    uploadToTestflight: targets.includes('testflight') || (hasOta && wantsStore),
+    uploadToAppStore: wantsStore && !hasOta,
   };
 }
 

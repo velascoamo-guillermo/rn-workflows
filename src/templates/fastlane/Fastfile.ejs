@@ -88,12 +88,12 @@ platform :ios do
       googleservice_info_plist_path: "GoogleService-Info.plist"
     )
 <% } -%>
-<% if (profile.targets.includes('testflight')) { -%>
+<% if (profile.uploadToTestflight) { -%>
     upload_to_testflight(
       skip_waiting_for_build_processing: true
     )
 <% } -%>
-<% if (profile.targets.includes('store')) { -%>
+<% if (profile.uploadToAppStore) { -%>
     upload_to_app_store(
       force: true,
       skip_metadata: true,

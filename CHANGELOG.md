@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   resolves the same value for both (use the `fingerprint` policy).
 - The Play track defaults to `internal` when `ota` is set (set
   `android.track` to override).
+- With `ota`, the iOS lane stops at TestFlight: a `store` target uploads to
+  TestFlight and never calls `upload_to_app_store` (submit from App Store
+  Connect).
 
 ### Added
 

@@ -381,6 +381,36 @@ describe('plan select step (change detection)', () => {
     expect((await runSelect(dir, { RNW_BEFORE: base })).keys).toEqual([]);
   });
 
+  test('apps/foo and apps/foobar: a change in one never selects the other (M-9)', async () => {
+    const pair = render([
+      { dir: 'apps/foo', slug: 'foo', config: otaAndroid },
+      { dir: 'apps/foobar', slug: 'foobar', config: otaAndroid },
+    ]);
+    const pairPlan = job(pair, 'plan');
+    const pairSelect = getStep(pair, 'plan', 'select');
+    const run = async (file: string): Promise<string[]> => {
+      const { dir, base } = repo();
+      commitFile(dir, file);
+      const r = await runStep(pairSelect, {
+        cwd: dir,
+        env: {
+          RELEASE_LEGS: pairPlan.env!['RELEASE_LEGS']!,
+          QUALITY_LEGS: pairPlan.env!['QUALITY_LEGS']!,
+          APP_FILTER: '',
+          RNW_BEFORE: base,
+          GITHUB_EVENT_NAME: 'push',
+          GITHUB_REF_TYPE: 'branch',
+          GITHUB_REF_NAME: 'main',
+          GITHUB_SHA: git(dir, 'rev-parse', 'HEAD'),
+        },
+      });
+      expect(r.code).toBe(0);
+      return (JSON.parse(r.outputs['selected']!) as Leg[]).map((l) => l.app);
+    };
+    expect(await run('apps/foobar/src/index.ts')).toEqual(['foobar']);
+    expect(await run('apps/foo/src/index.ts')).toEqual(['foo']);
+  });
+
   test('a change under a shared extraPath selects every app that declares it', async () => {
     const { dir, base } = repo();
     commitFile(dir, 'packages/kit/index.ts');

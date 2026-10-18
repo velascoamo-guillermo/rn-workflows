@@ -100,6 +100,48 @@ function legsFromEnv<T>(parsed: WorkflowYaml, key: string): T[] {
   return JSON.parse(raw!) as T[];
 }
 
+/**
+ * Characterization (#53): matrix output for configs WITHOUT `ota` must stay
+ * byte-identical while OTA routing is reworked. Never update with `-u`.
+ */
+describe('matrix output for non-ota apps is byte-identical', () => {
+  const { ota: _ota, ...pawlogProductionNoOta } = pawlogConfig.build['production']!;
+  const pawlogNoOta: Config = { ...pawlogConfig, build: { production: pawlogProductionNoOta } };
+  const selfHostedNoOta: Config = {
+    ...pawlogNoOta,
+    project: { ...pawlogNoOta.project, bundleId: 'com.shipyard.nightly', packageName: 'com.shipyard.nightly' },
+    checks: { lint: true },
+    runners: { ios: ['self-hosted', 'macos-arm'] },
+    env: { SENTRY_DISABLE_AUTO_UPLOAD: 'true' },
+  };
+
+  test('bun, two apps (store all + firebase android)', () => {
+    const file = generateMatrixWorkflow(
+      [
+        { dir: 'apps/pawlog', slug: 'pawlog', config: pawlogNoOta },
+        { dir: 'apps/vaulty', slug: 'vaulty', config: vaultyConfig },
+      ],
+      { packageManager: 'bun' },
+    );
+    expect(file.content).toMatchSnapshot();
+  });
+
+  test('yarn default, self-hosted ios runner + root-level app', () => {
+    const file = generateMatrixWorkflow([
+      { dir: '', slug: 'nightly', config: selfHostedNoOta },
+      { dir: 'apps/vaulty', slug: 'vaulty', config: vaultyConfig },
+    ]);
+    expect(file.content).toMatchSnapshot();
+  });
+
+  test('npm, single android app without checks', () => {
+    const file = generateMatrixWorkflow([{ dir: 'apps/vaulty', slug: 'vaulty', config: vaultyConfig }], {
+      packageManager: 'npm',
+    });
+    expect(file.content).toMatchSnapshot();
+  });
+});
+
 describe('discoverConfigs', () => {
   function makeTree(): string {
     const root = mkdtempSync(join(tmpdir(), 'rnwf-matrix-'));

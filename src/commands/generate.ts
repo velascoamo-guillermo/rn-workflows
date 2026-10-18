@@ -374,7 +374,16 @@ export default defineCommand({
     };
 
     const requiredSecrets = deriveRequiredSecrets(config);
-    const otaReports = collectOtaReadiness(config, appDirAbs);
+    // The OTA/e2e pipeline is GitHub Actions only: GitLab gets a plain
+    // pipeline, so readiness checks and the SETUP.md OTA section don't apply.
+    const otaProfiles = Object.entries(config.build).filter(([, profile]) => profile.ota);
+    if (config.ci !== 'github-actions' && otaProfiles.length > 0) {
+      p.log.warn(
+        `ota/e2e are ignored for ${config.ci}: the fingerprint OTA + Maestro pipeline is GitHub Actions only (profiles: ${otaProfiles.map(([name]) => name).join(', ')}). A plain release pipeline was generated.`,
+      );
+    }
+    const otaReports =
+      config.ci === 'github-actions' ? collectOtaReadiness(config, appDirAbs) : [];
     logOtaFindings(otaReports);
 
     // A push-triggered matrix workflow already owns CI for this repo: a

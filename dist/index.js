@@ -1662,7 +1662,11 @@ var generate_default = defineCommand2({
       ...gitRoot ? { workflowsPathFromRoot: toPosixRelative(gitRoot, workflowsDir) } : {}
     };
     const requiredSecrets = deriveRequiredSecrets(config);
-    const otaReports = collectOtaReadiness(config, appDirAbs);
+    const otaProfiles = Object.entries(config.build).filter(([, profile]) => profile.ota);
+    if (config.ci !== "github-actions" && otaProfiles.length > 0) {
+      p2.log.warn(`ota/e2e are ignored for ${config.ci}: the fingerprint OTA + Maestro pipeline is GitHub Actions only (profiles: ${otaProfiles.map(([name]) => name).join(", ")}). A plain release pipeline was generated.`);
+    }
+    const otaReports = config.ci === "github-actions" ? collectOtaReadiness(config, appDirAbs) : [];
     logOtaFindings(otaReports);
     const matrixWorkflow = config.ci === "github-actions" ? findMatrixWorkflow(gitRoot, workflowsDir) : null;
     if (matrixWorkflow) {

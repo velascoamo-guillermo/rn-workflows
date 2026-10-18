@@ -624,8 +624,8 @@ describe('matrix e2e legs (#54)', () => {
 
   for (const p of ['ios', 'android'] as const) {
     test(`ota ${p} e2e leg: package → upload(staging) → binary → guard → flows → promote`, () => {
-      const ran = running(ota, { matrix: leg(p, true) });
-      const order = ['update-id', 'upload-staging', `${p}-e2e-build`, `${p}-guard-flow`, `${p}-maestro`, 'promote'];
+      const ran = running(ota, { matrix: leg(p, true), steps: { fresh: { promote: 'true' } } });
+      const order = ['update-id', 'upload-staging', `${p}-e2e-build`, `${p}-guard-flow`, `${p}-maestro`, 'fresh', 'promote'];
       const at = order.map((id) => ran.indexOf(id));
       expect(at.every((i) => i >= 0)).toBe(true);
       expect([...at].sort((a, b) => a - b)).toEqual(at);
@@ -674,10 +674,10 @@ describe('matrix e2e legs (#54)', () => {
     });
 
     test(`native ${p}: recheck hit ships this commit as an OTA (staging → e2e → promote), no fastlane/tag`, () => {
-      const ran = running(native, { matrix: leg(p, true), steps: { recheck: { exists: 'true' } } });
+      const ran = running(native, { matrix: leg(p, true), steps: { recheck: { exists: 'true' }, 'ota-fresh': { promote: 'true' } } });
       expect(ran).not.toContain('fastlane');
       expect(ran).not.toContain('tag');
-      const order = ['ota-update-id', 'ota-upload-staging', `ota-${p}-e2e-cache`, `ota-${p}-e2e-build`, `ota-${p}-guard-flow`, `ota-${p}-maestro`, 'ota-promote'];
+      const order = ['ota-update-id', 'ota-upload-staging', `ota-${p}-e2e-cache`, `ota-${p}-e2e-build`, `ota-${p}-guard-flow`, `ota-${p}-maestro`, 'ota-fresh', 'ota-promote'];
       const at = order.map((id) => ran.indexOf(id));
       expect(at.every((i) => i >= 0)).toBe(true);
       expect([...at].sort((a, b) => a - b)).toEqual(at);

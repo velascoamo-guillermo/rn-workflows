@@ -40,7 +40,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ci.runners` and `ci.env` (with reserved-key validation).
 - Self-hosted runner toolchain setup.
 - Staging upload, e2e update-id guard, Maestro run and auto-promote to the
-  production channel.
+  production channel. Promote runs only when the run is on the profile
+  branch and `origin/<branch>` still points at `$GITHUB_SHA`; otherwise it
+  is skipped with a notice (re-runs of old commits, `v*` tags and dispatches
+  from other branches never promote).
 - `generate --matrix`: plan-time fingerprint routing, ota/native matrices; a
   native re-check that finds another run already released the fingerprint
   ships the commit as an OTA.
@@ -60,6 +63,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Matrix e2e cannot mix Expo and bare apps.
 - The Maestro installer is not checksummed.
 - The Android emulator is x86_64 only.
+- Without `e2e`, the OTA upload goes straight to the production channel and
+  has no branch-tip check; ordering relies on the per-platform concurrency
+  group only.
 
 ## 0.2.0 - 2026-08-04
 

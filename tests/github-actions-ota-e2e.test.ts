@@ -255,7 +255,7 @@ describe('platform coverage', () => {
 
 describe('native-<p>: recheck hit ships this commit as an OTA instead of skipping (#54 M-1)', () => {
   const running = (job: WorkflowJob, exists: string): string[] =>
-    job.steps.filter((s) => stepRuns(s, { steps: { recheck: { exists } } })).map((s) => s.id ?? s.name ?? '');
+    job.steps.filter((s) => stepRuns(s, { steps: { recheck: { exists }, 'ota-fresh': { promote: 'true' } } })).map((s) => s.id ?? s.name ?? '');
   const ordered = (ran: string[], ids: string[]): void => {
     const at = ids.map((id) => ran.indexOf(id));
     expect({ ids, at: at.every((i) => i >= 0) }).toEqual({ ids, at: true });
@@ -270,7 +270,7 @@ describe('native-<p>: recheck hit ships this commit as an OTA instead of skippin
       const ran = running(job, 'true');
       expect(ran.some((id) => job.steps.find((s) => (s.id ?? s.name) === id && isFastlane(s)))).toBe(false);
       expect(ran).not.toContain('tag');
-      ordered(ran, ['recheck', 'ota-update-id', 'ota-upload-staging', 'ota-e2e-cache', 'ota-e2e-build', 'ota-guard-flow', 'ota-maestro', 'ota-promote']);
+      ordered(ran, ['recheck', 'ota-update-id', 'ota-upload-staging', 'ota-e2e-cache', 'ota-e2e-build', 'ota-guard-flow', 'ota-maestro', 'ota-fresh', 'ota-promote']);
       expect(ran.at(-1)).toBe('ota-promote');
       expect(step(job, 'ota-upload-staging').env?.RNW_CHANNEL).toBe('staging');
       expect(step(job, 'ota-promote').env?.RNW_CHANNEL).toBe('production');
@@ -295,7 +295,7 @@ describe('native-<p>: recheck hit ships this commit as an OTA instead of skippin
     test(`${p} e2e: OTA branch scripts byte-identical to ota-${p}`, () => {
       const job = all.jobs[`native-${p}`]!;
       const ota = all.jobs[`ota-${p}`]!;
-      for (const id of ['export', 'package', 'update-id', 'upload-staging', 'guard-flow', 'promote', 'e2e-build', 'e2e-patch']) {
+      for (const id of ['export', 'package', 'update-id', 'upload-staging', 'guard-flow', 'fresh', 'promote', 'e2e-build', 'e2e-patch']) {
         expect({ id, run: step(job, `ota-${id}`).run }).toEqual({ id, run: step(ota, id).run });
       }
     });

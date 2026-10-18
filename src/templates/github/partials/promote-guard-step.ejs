@@ -1,0 +1,40 @@
+<%#
+  Never promote a stale commit: right before promote, require a branch run on
+  the profile branch whose origin tip is still $GITHUB_SHA. Otherwise skip
+  promote with a notice (staging upload + e2e already ran) and succeed.
+  An unreachable origin fails the step rather than promoting blind.
+  Locals: stepId, branchExpr (YAML-rendered value), gate (bare `if:` or '').
+  Step output: steps.<stepId>.outputs.promote ('true' | 'false').
+-%>
+      - name: Check this commit is still the branch tip
+        id: <%= stepId %>
+<% if (gate) { -%>
+        if: <%- gate %>
+<% } -%>
+        env:
+          RNW_BRANCH: <%- branchExpr %>
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE:-}" != "branch" ] || [ "${GITHUB_REF_NAME:-}" != "$RNW_BRANCH" ]; then
+            echo "::notice::Not a run on $RNW_BRANCH (${GITHUB_REF_TYPE:-?} ${GITHUB_REF_NAME:-?}); skipping promote. The staging upload and e2e stand."
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          rc=0
+          tip=$(git ls-remote --exit-code origin "refs/heads/$RNW_BRANCH") || rc=$?
+          case "$rc" in
+            0) ;;
+            2)
+              echo "::notice::origin has no branch $RNW_BRANCH; skipping promote."
+              echo "promote=false" >> "$GITHUB_OUTPUT"
+              exit 0 ;;
+            *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
+          esac
+          tip=${tip%%[[:space:]]*}
+          if [ "$tip" = "$GITHUB_SHA" ]; then
+            echo "promote=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$RNW_BRANCH moved on ($tip) since $GITHUB_SHA; skipping promote so an older commit never overrides a newer one. The staging upload and e2e stand."
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+          fi
+

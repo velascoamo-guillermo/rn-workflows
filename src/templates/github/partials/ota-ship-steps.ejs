@@ -1,12 +1,13 @@
 <%#
   Smart workflow: ship this commit as an OTA update for one platform job.
   With e2e: package → upload(staging) → test binary (restore, else build) →
-  update-id guard → flows → promote. Without: package → upload(channel).
+  update-id guard → flows → branch-tip guard → promote. Without: package → upload(channel).
   Used by ota-<p> and by native-<p> when its tag re-check hits (another run
   shipped this runtimeVersion while this one was queued).
   Locals: job, idPrefix (step id prefix; also the update-id prefix), gate
   (bare `if:` condition ANDed into every step), toolchain (bool: select
-  Xcode / set up the JDK here; the native job already did).
+  Xcode / set up the JDK here; the native job already did). Uses top-level
+  branch (the profile branch).
 -%>
 <%- include('ota-package-steps', { platform: job.platform }) -%>
 <% if (job.e2e) { -%>
@@ -23,7 +24,8 @@
 <% } -%>
 <%- include(`e2e-binary-${job.platform}`, { e2e: job.e2e, hashExpr: job.hashExpr, setupJava: toolchain, restore: true }) -%>
 <%- include(`maestro-${job.platform}`, { e2e: job.e2e, guard: true, selfHosted: job.selfHosted, pkgPrefix: idPrefix }) -%>
-<%- include('ota-upload-step', { stepId: `${idPrefix}promote`, stepName: 'Promote OTA update to production channel', hashExpr: job.hashExpr }) -%>
+<%- include('promote-guard-step', { stepId: `${idPrefix}fresh`, branchExpr: yamlScalar(branch) }) -%>
+<%- include('ota-upload-step', { stepId: `${idPrefix}promote`, stepName: 'Promote OTA update to production channel', gate: joinIf(gate, `steps.${idPrefix}fresh.outputs.promote == 'true'`), hashExpr: job.hashExpr }) -%>
 <% } else { -%>
 <%- include('ota-upload-step', { stepId: `${idPrefix}upload`, hashExpr: job.hashExpr }) -%>
 <% } -%>

@@ -2,6 +2,7 @@ import type { Config } from '../config/schema.ts';
 import { renderTemplate } from '../utils/render.ts';
 import { platformsFor, secretsFor } from '../secrets.ts';
 import type { GeneratedFile } from './fastlane.ts';
+import { isSelfHosted, runsOnFor, type RunsOn } from './github-shared.ts';
 
 /** Filename of the single emitted matrix workflow. */
 export const MATRIX_WORKFLOW_FILENAME = 'rn-release-matrix.yml';
@@ -27,7 +28,9 @@ interface ReleaseLeg {
   dir: string;
   profile: string;
   platform: 'android' | 'ios';
-  runsOn: string;
+  runsOn: RunsOn;
+  /** Runner is self-hosted: no setup-ruby/setup-xcode, `bundle install` instead. */
+  selfHosted: boolean;
   /** Leg participates in OTA fingerprint/skip logic. */
   ota: boolean;
   /**
@@ -102,12 +105,14 @@ export function generateMatrixWorkflow(
         for (const secret of secretsFor(platform, profile.distribution)) {
           secretUnion.add(secret);
         }
+        const runsOn = runsOnFor(app.config, platform);
         releaseLegs.push({
           app: app.slug,
           dir: legDir(app.dir),
           profile: profileName,
           platform,
-          runsOn: platform === 'ios' ? 'macos-latest' : 'ubuntu-latest',
+          runsOn,
+          selfHosted: isSelfHosted(runsOn),
           ota: hasOtaProfile,
           otaUpload: hasOtaProfile && platform === uploadPlatform,
           otaServer: profile.ota?.server ?? '',
@@ -119,13 +124,19 @@ export function generateMatrixWorkflow(
 
   const secrets = [...secretUnion].sort();
   const hasOta = releaseLegs.some((leg) => leg.ota);
+  const hasSelfHosted = releaseLegs.some((leg) => leg.selfHosted);
+  // Keep legs byte-identical to pre-runners output unless a self-hosted leg exists.
+  const emittedLegs = hasSelfHosted
+    ? releaseLegs
+    : releaseLegs.map(({ selfHosted: _selfHosted, ...rest }) => rest);
 
   const content = renderTemplate('github/workflow-matrix.ejs', {
     packageManager,
     qualityLegsJson: JSON.stringify(qualityLegs),
-    releaseLegsJson: JSON.stringify(releaseLegs),
+    releaseLegsJson: JSON.stringify(emittedLegs),
     hasQuality: qualityLegs.length > 0,
     hasOta,
+    hasSelfHosted,
     secrets,
     matchAuth: hasIos && secrets.includes('MATCH_PASSWORD'),
   });

@@ -78,14 +78,20 @@ try {
   groups[0]!.files = render(fixtures.filter((f) => !f.startsWith('ota-')), join(tmp, 'legacy'));
   groups[1]!.files = render(fixtures.filter((f) => f.startsWith('ota-')), join(tmp, 'ota'));
 
+  // Fixtures use custom self-hosted runner labels (ci.runners); declare them.
+  const actionlintConfig = join(tmp, 'actionlint.yaml');
+  writeFileSync(actionlintConfig, 'self-hosted-runner:\n  labels:\n    - macos-arm\n');
+
   for (const group of groups) {
     if (group.files.length === 0) {
       console.log(`[${group.label}] no fixtures, skipping`);
       continue;
     }
     const args = group.shellcheck
-      ? [...OTA_IGNORES.flatMap((pattern) => ['-ignore', pattern.replace(/[.]/g, '\\.')]), ...group.files]
+      ? ['-config-file', actionlintConfig, ...OTA_IGNORES.flatMap((pattern) => ['-ignore', pattern.replace(/[.]/g, '\\.')]), ...group.files]
       : [
+          '-config-file',
+          actionlintConfig,
           '-shellcheck=',
           ...LEGACY_IGNORES.flatMap((pattern) => ['-ignore', pattern.replace(/[.]/g, '\\.')]),
           ...group.files,

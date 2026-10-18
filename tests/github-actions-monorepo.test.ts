@@ -214,50 +214,21 @@ describe('generateGithubActions in a monorepo', () => {
           expect(job.defaults).toBeUndefined();
         }
       }
-      expect(parsed.jobs['save-fingerprint']!.defaults).toBeUndefined();
-      expect(parsed.jobs['fingerprint']!.defaults?.run?.['working-directory']).toBe('apps/mobile');
-      expect(parsed.jobs['ota-update']!.defaults?.run?.['working-directory']).toBe('apps/mobile');
-      expect(parsed.jobs['build-ios']!.defaults?.run?.['working-directory']).toBe('apps/mobile');
-      expect(parsed.jobs['build-android']!.defaults?.run?.['working-directory']).toBe('apps/mobile');
+      for (const id of ['fingerprint', 'ota-ios', 'ota-android', 'native-ios', 'native-android']) {
+        expect(parsed.jobs[id]!.defaults?.run?.['working-directory']).toBe('apps/mobile');
+      }
     });
 
-    test('save-fingerprint job has no checkout step', () => {
+    test('no fingerprint cache marker in monorepo mode (#51: git-tag lookup instead)', () => {
       const { content } = generateGithubActions(otaConfig, monorepoOptions)[0]!;
-      const parsed = parseWorkflow(content);
-      const job = parsed.jobs['save-fingerprint']!;
-      expect(findStep(job, 'actions/checkout')).toBeUndefined();
-    });
-
-    test('actions/cache paths are prefixed with the app dir and match the written marker', () => {
-      const { content } = generateGithubActions(otaConfig, monorepoOptions)[0]!;
-      const parsed = parseWorkflow(content);
-
-      const check = findStep(parsed.jobs['fingerprint']!, 'actions/cache');
-      expect(check!.with?.path).toBe('apps/mobile/.rn-fingerprint');
-
-      const save = findStep(parsed.jobs['save-fingerprint']!, 'actions/cache/save');
-      expect(save!.with?.path).toBe('apps/mobile/.rn-fingerprint');
-
-      const marker = parsed.jobs['save-fingerprint']!.steps.find((s) => s.run?.includes('mkdir'));
-      expect(marker!.run).toContain('mkdir -p apps/mobile/.rn-fingerprint');
-      expect(marker!.run).toContain('> apps/mobile/.rn-fingerprint/hash');
-    });
-
-    test('cache paths stay unprefixed outside monorepo mode', () => {
-      const { content } = generateGithubActions(otaConfig)[0]!;
-      const parsed = parseWorkflow(content);
-      const check = findStep(parsed.jobs['fingerprint']!, 'actions/cache');
-      expect(check!.with?.path).toBe('.rn-fingerprint');
-      const save = findStep(parsed.jobs['save-fingerprint']!, 'actions/cache/save');
-      expect(save!.with?.path).toBe('.rn-fingerprint');
-      const marker = parsed.jobs['save-fingerprint']!.steps.find((s) => s.run?.includes('mkdir'));
-      expect(marker!.run).toContain('mkdir -p .rn-fingerprint');
+      expect(content).not.toContain('.rn-fingerprint');
+      expect(content).not.toContain('actions/cache');
     });
 
     test('setup-ruby in build jobs gets working-directory input in monorepo mode', () => {
       const { content } = generateGithubActions(otaConfig, monorepoOptions)[0]!;
       const parsed = parseWorkflow(content);
-      for (const id of ['build-ios', 'build-android']) {
+      for (const id of ['native-ios', 'native-android']) {
         const ruby = findStep(parsed.jobs[id]!, 'ruby/setup-ruby');
         expect(ruby!.with?.['working-directory']).toBe('apps/mobile');
       }

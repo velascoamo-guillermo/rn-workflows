@@ -1,0 +1,23 @@
+<%#
+  POST bundle.zip to the OTA server. Every value reaches the shell via env;
+  --form-string keeps user strings literal (no curl @file / <file reads).
+  Locals: otaServer, otaChannel, hashExpr (YAML-rendered values).
+-%>
+      - name: Upload OTA update
+        id: upload
+        env:
+          RNW_OTA_SERVER: <%- otaServer %>
+          RNW_CHANNEL: <%- otaChannel %>
+          RNW_HASH: <%- hashExpr %>
+          RNW_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          OTA_UPLOAD_KEY: ${{ secrets.OTA_UPLOAD_KEY }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body -sS -X POST "$RNW_OTA_SERVER/api/upload" \
+            -F "file=@bundle.zip" \
+            --form-string "runtimeVersion=$RNW_HASH" \
+            --form-string "channel=$RNW_CHANNEL" \
+            --form-string "commitHash=$GITHUB_SHA" \
+            --form-string "commitMessage=$RNW_COMMIT_MESSAGE" \
+            --form-string "uploadKey=$OTA_UPLOAD_KEY"
+

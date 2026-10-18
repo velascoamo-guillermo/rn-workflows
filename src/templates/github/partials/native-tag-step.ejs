@@ -1,0 +1,11 @@
+<%#
+  Mark "native binary shipped for this runtimeVersion". Must run after the
+  store/distribution lane succeeded; the job needs `contents: write`.
+  Locals: tagPrefix, hashExpr (YAML-rendered values).
+-%>
+      - name: Tag native release
+        id: tag
+        env:
+          RNW_TAG_PREFIX: <%- tagPrefix %>
+          RNW_HASH: <%- hashExpr %>
+        run: git tag "$RNW_TAG_PREFIX/$RNW_HASH" && git push origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH"

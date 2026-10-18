@@ -16,6 +16,9 @@ on:
       - '<%- yamlSingleQuoted(selfPath) %>'
 <% } -%>
 
+permissions:
+  contents: read
+
 jobs:
 <% if (hasChecks) { -%>
   quality:
@@ -77,8 +80,10 @@ jobs:
         working-directory: <%- yamlScalar(appDir) %>
 <% } -%>
     outputs:
-      hash: ${{ steps.fp.outputs.hash }}
-      native_exists: ${{ steps.cache-check.outputs.cache-hit }}
+<% for (const job of jobs) { -%>
+      <%= job.platform %>_hash: ${{ steps.fp-<%= job.platform %>.outputs.hash }}
+      <%= job.platform %>_native_exists: ${{ steps.native-<%= job.platform %>.outputs.exists }}
+<% } -%>
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -102,25 +107,24 @@ jobs:
       - name: Install JS dependencies
         run: <%= packageManager === 'bun' ? 'bun install --frozen-lockfile' : packageManager === 'npm' ? 'npm ci' : 'yarn install --frozen-lockfile' %>
 
-      - name: Compute fingerprint
-        id: fp
-        run: |
-          HASH=$(npx --yes @expo/fingerprint . 2>/dev/null)
-          echo "hash=$HASH" >> $GITHUB_OUTPUT
-
-      - name: Check if native binary exists for this fingerprint
-        id: cache-check
-        uses: actions/cache@v4
-        with:
-          key: fingerprint-${{ steps.fp.outputs.hash }}
-          path: <%- yamlScalar(`${appDir ? `${appDir}/` : ''}.rn-fingerprint`) %>
-          lookup-only: true
-
-  ota-update:
-    name: OTA Update
-    runs-on: ubuntu-latest
+<% for (const job of jobs) { -%>
+<%- include('partials/fingerprint-steps', { platform: job.platform, tagPrefix: job.tagPrefix }) -%>
+<% } -%>
+<% for (const job of jobs) { -%>
+  ota-<%= job.platform %>:
+    name: <%- yamlScalar(`OTA update ${job.lane} (${job.platform})`) %>
+    runs-on: <%- job.runsOn %>
+<% if (job.env.length > 0) { -%>
+    env:
+<% for (const e of job.env) { -%>
+      <%= e.key %>: <%- e.value %>
+<% } -%>
+<% } -%>
     needs: fingerprint
-    if: needs.fingerprint.outputs.native_exists == 'true'
+    if: needs.fingerprint.outputs.<%= job.platform %>_native_exists == 'true'
+    concurrency:
+      group: <%- job.concurrencyGroup %>
+      cancel-in-progress: false
 <% if (appDir) { -%>
     defaults:
       run:
@@ -149,34 +153,22 @@ jobs:
       - name: Install JS dependencies
         run: <%= packageManager === 'bun' ? 'bun install --frozen-lockfile' : packageManager === 'npm' ? 'npm ci' : 'yarn install --frozen-lockfile' %>
 
-      - name: Export JS bundle
-        run: npx expo export --platform all --output-dir dist
-
-      - name: Package bundle
-        run: cd dist && zip -r ../bundle.zip .
-
-      - name: Upload OTA update
-        run: |
-          curl -X POST <%- ota.server %>/api/upload \
-            -F "file=@bundle.zip" \
-            -F "runtimeVersion=${{ needs.fingerprint.outputs.hash }}" \
-            -F "channel=<%= ota.channel %>" \
-            -F "commitHash=${{ github.sha }}" \
-            -F "commitMessage=${{ github.event.head_commit.message }}" \
-            -F "uploadKey=${{ secrets.OTA_UPLOAD_KEY }}"
-
+<%- include('partials/ota-package-steps', { platform: job.platform }) -%>
+<%- include('partials/ota-upload-step', { hashExpr: `\${{ needs.fingerprint.outputs.${job.platform}_hash }}` }) -%>
+<% } -%>
 <% for (const job of jobs) { -%>
-  <%= job.id %>:
+  native-<%= job.platform %>:
     name: <%- yamlScalar(job.name) %>
     runs-on: <%- job.runsOn %>
-<% if (job.env.length > 0) { -%>
+    permissions:
+      contents: write
     env:
 <% for (const e of job.env) { -%>
       <%= e.key %>: <%- e.value %>
 <% } -%>
-<% } -%>
+      EXPO_UPDATES_FINGERPRINT_OVERRIDE: ${{ needs.fingerprint.outputs.<%= job.platform %>_hash }}
     needs: fingerprint
-    if: needs.fingerprint.outputs.native_exists != 'true'
+    if: needs.fingerprint.outputs.<%= job.platform %>_native_exists != 'true'
 <% if (appDir) { -%>
     defaults:
       run:
@@ -247,22 +239,8 @@ jobs:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"
 <% } -%>
 
-<% } -%>
-  save-fingerprint:
-    name: Save fingerprint cache
-    runs-on: ubuntu-latest
-    needs: [fingerprint<% for (const job of jobs) { -%>, <%= job.id -%><% } %>]
-    if: |
-      always() &&
-      needs.fingerprint.outputs.native_exists != 'true' &&
-      !contains(needs.*.result, 'failure') &&
-      !contains(needs.*.result, 'cancelled')
-    steps:
-      - name: Create marker file
-        run: mkdir -p <%- appDir ? `${appDir}/` : '' %>.rn-fingerprint && echo "${{ needs.fingerprint.outputs.hash }}" > <%- appDir ? `${appDir}/` : '' %>.rn-fingerprint/hash
+<%- include('partials/native-tag-step', { tagPrefix: job.tagPrefix, hashExpr: `\${{ needs.fingerprint.outputs.${job.platform}_hash }}` }) -%>
+<% if (job !== jobs[jobs.length - 1]) { -%>
 
-      - name: Save fingerprint to cache
-        uses: actions/cache/save@v4
-        with:
-          key: fingerprint-${{ needs.fingerprint.outputs.hash }}
-          path: <%- yamlScalar(`${appDir ? `${appDir}/` : ''}.rn-fingerprint`) %>
+<% } -%>
+<% } -%>

@@ -1,0 +1,34 @@
+<%#
+  Per-platform runtimeVersion + "native release exists" lookup.
+  Locals: platform ('ios' | 'android'), tagPrefix (YAML-rendered scalar).
+  Step outputs: steps.fp-<platform>.outputs.hash, steps.native-<platform>.outputs.exists.
+-%>
+      - name: Resolve runtimeVersion (<%= platform %>)
+        id: fp-<%= platform %>
+        env:
+          RNW_PLATFORM: <%= platform %>
+        run: |
+          set -euo pipefail
+          HASH=$(node "$(node -p "require.resolve('expo-updates/bin/cli.js')")" runtimeversion:resolve --platform "$RNW_PLATFORM" | tail -n1 | jq -er '.runtimeVersion')
+          SAFE='^[A-Za-z0-9._-]+$'
+          if [[ ! "$HASH" =~ $SAFE ]]; then
+            echo "::error::runtimeVersion for $RNW_PLATFORM is missing or unsafe; set runtimeVersion: { policy: \"fingerprint\" } in app config"
+            exit 1
+          fi
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Check native release tag (<%= platform %>)
+        id: native-<%= platform %>
+        env:
+          RNW_TAG_PREFIX: <%- tagPrefix %>
+          RNW_HASH: ${{ steps.fp-<%= platform %>.outputs.hash }}
+        run: |
+          set -euo pipefail
+          rc=0
+          git ls-remote --exit-code --tags origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" > /dev/null || rc=$?
+          case "$rc" in
+            0) echo "exists=true" >> "$GITHUB_OUTPUT" ;;
+            2) echo "exists=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
+          esac
+

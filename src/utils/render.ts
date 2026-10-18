@@ -5,7 +5,13 @@ import ejs from 'ejs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-function resolveTemplate(relPath: string): string {
+interface ResolvedTemplate {
+  /** Absolute path; passed to EJS as `filename` so `include()` resolves partials relative to it. */
+  path: string;
+  source: string;
+}
+
+function resolveTemplate(relPath: string): ResolvedTemplate {
   const candidates = [
     // dev: src/utils/render.ts → src/templates/<relPath>
     join(here, '..', 'templates', relPath),
@@ -16,7 +22,7 @@ function resolveTemplate(relPath: string): string {
   ];
   for (const p of candidates) {
     try {
-      return readFileSync(p, 'utf8');
+      return { path: p, source: readFileSync(p, 'utf8') };
     } catch {}
   }
   throw new Error(`Template not found: ${relPath}`);
@@ -106,5 +112,5 @@ export function yamlSingleQuoted(value: string): string {
 export function renderTemplate(relPath: string, data: Record<string, unknown>): string {
   const tpl = resolveTemplate(relPath);
   const helpers = { rubyString, rubySymbol, yamlScalar, yamlSingleQuoted };
-  return ejs.render(tpl, { ...helpers, ...data }, { rmWhitespace: false });
+  return ejs.render(tpl.source, { ...helpers, ...data }, { rmWhitespace: false, filename: tpl.path });
 }

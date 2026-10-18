@@ -1,0 +1,27 @@
+<%#
+  Export one platform's bundle, add expoconfig.json, zip, compute update id.
+  Locals: platform ('ios' | 'android'), expoCli (e.g. 'npx expo').
+  Step outputs: steps.update-id.outputs.update_id (UUID, = Updates.updateId).
+-%>
+      - name: Export JS bundle (<%= platform %>)
+        id: export
+        env:
+          RNW_PLATFORM: <%= platform %>
+        run: <%- expoCli %> export --platform "$RNW_PLATFORM" --output-dir dist
+
+      - name: Package bundle
+        id: package
+        run: |
+          set -euo pipefail
+          <%- expoCli %> config --type public --json > dist/expoconfig.json
+          jq -e . dist/expoconfig.json > /dev/null
+          rm -f bundle.zip
+          (cd dist && zip -qr ../bundle.zip .)
+
+      - name: Compute update id
+        id: update-id
+        run: |
+          set -euo pipefail
+          UPDATE_ID=$(node -e 'const h = require("crypto").createHash("sha256").update(require("fs").readFileSync("dist/metadata.json")).digest("hex"); console.log([h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20, 32)].join("-"))')
+          echo "update_id=$UPDATE_ID" >> "$GITHUB_OUTPUT"
+

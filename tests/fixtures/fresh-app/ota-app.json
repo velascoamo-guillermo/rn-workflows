@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Guille Fresh App",
+    "slug": "guille-fresh-app",
+    "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://ota.example.com/api/manifest",
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      },
+      "codeSigningCertificate": "./certs/certificate.pem",
+      "codeSigningMetadata": {
+        "keyid": "main",
+        "alg": "rsa-v1_5-sha256"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.example.fresh"
+    },
+    "android": {
+      "package": "com.example.fresh"
+    }
+  }
+}

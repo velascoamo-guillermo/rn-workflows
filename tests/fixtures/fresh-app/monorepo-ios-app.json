@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "MonoIos",
+    "slug": "mono-ios",
+    "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "http://localhost:3000/api/manifest",
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      },
+      "codeSigningCertificate": "./certs/certificate.pem",
+      "codeSigningMetadata": {
+        "keyid": "main",
+        "alg": "rsa-v1_5-sha256"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.example.monoios"
+    }
+  }
+}

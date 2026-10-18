@@ -1,7 +1,13 @@
 import type { Config } from '../config/schema.ts';
 import { renderTemplate, yamlScalar } from '../utils/render.ts';
 import { platformsFor, secretsFor } from '../secrets.ts';
-import { isSelfHosted, renderRunsOn, runsOnFor } from './github-shared.ts';
+import {
+  isSelfHosted,
+  legConcurrencyGroup,
+  nativeTagPrefix,
+  renderRunsOn,
+  runsOnFor,
+} from './github-shared.ts';
 import type { GeneratedFile } from './fastlane.ts';
 
 const DEFAULT_BRANCH: Record<string, string> = {
@@ -12,6 +18,13 @@ const DEFAULT_BRANCH: Record<string, string> = {
 
 function branchFor(profileName: string): string {
   return DEFAULT_BRANCH[profileName] ?? 'main';
+}
+
+/** Command prefix for the Expo CLI under the project's package manager. */
+function expoCliFor(packageManager: 'yarn' | 'npm' | 'bun'): string {
+  if (packageManager === 'bun') return 'bunx expo';
+  if (packageManager === 'npm') return 'npx expo';
+  return 'yarn expo';
 }
 
 export interface GithubActionsOptions {
@@ -66,6 +79,9 @@ export function generateGithubActions(
         selfHosted: isSelfHosted(runsOn),
         env: jobEnv,
         secrets: secretsFor(platform, profile.distribution),
+        // Smart (OTA) workflow only; unused by workflow.ejs.
+        tagPrefix: yamlScalar(nativeTagPrefix({ appSlug: options.appSlug, profile: name, platform })),
+        concurrencyGroup: yamlScalar(legConcurrencyGroup({ appSlug: options.appSlug, profile: name, platform })),
       };
     });
 
@@ -91,7 +107,13 @@ export function generateGithubActions(
 
     const content = renderTemplate(templateName, {
       ...templateData,
-      ...(profile.ota ? { ota: profile.ota } : {}),
+      ...(profile.ota
+        ? {
+            otaServer: yamlScalar(profile.ota.server),
+            otaChannel: yamlScalar(profile.ota.channel),
+            expoCli: expoCliFor(packageManager),
+          }
+        : {}),
     });
 
     files.push({ path: `${workflowsDir}/${filename}`, content });

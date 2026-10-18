@@ -109,10 +109,13 @@ describe('github-actions EJS escaping of hostile-but-legal config values (#35)',
     };
     const { content } = generateGithubActions(config, { appDir: 'apps/mobile' })[0]!;
     expect(content).not.toContain('&amp;');
-    expect(content).toContain('curl -X POST https://ota.example.com/a&b/api/upload');
+    // #51: the server reaches curl only through the upload step's env.
+    const parsed = yaml.load(content) as { jobs: Record<string, { steps: Array<{ id?: string; env?: Record<string, string> }> }> };
+    const upload = parsed.jobs['ota-ios']!.steps.find((s) => s.id === 'upload')!;
+    expect(upload.env?.RNW_OTA_SERVER).toBe('https://ota.example.com/a&b');
   });
 
-  test('appDir is interpolated raw into `mkdir -p`, not HTML-escaped (#40)', () => {
+  test('appDir is rendered raw into working-directory, not HTML-escaped (#40)', () => {
     const config: Config = {
       project: { type: 'expo', bundleId: 'com.test.app', packageName: 'com.test.app' },
       ci: 'github-actions',
@@ -129,6 +132,8 @@ describe('github-actions EJS escaping of hostile-but-legal config values (#35)',
     // config — but the fix is about the render path, not schema.
     const { content } = generateGithubActions(config, { appDir: `apps/o'brien&co` })[0]!;
     expect(content).not.toContain('&amp;');
-    expect(content).toContain(`mkdir -p apps/o'brien&co/.rn-fingerprint`);
+    // #51 removed the `.rn-fingerprint` marker; appDir now only lands in YAML scalars.
+    const parsed = yaml.load(content) as { jobs: Record<string, { defaults?: { run?: { 'working-directory'?: string } } }> };
+    expect(parsed.jobs['fingerprint']!.defaults?.run?.['working-directory']).toBe(`apps/o'brien&co`);
   });
 });

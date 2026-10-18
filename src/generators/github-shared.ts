@@ -24,3 +24,25 @@ export function renderRunsOn(runsOn: RunsOn): string {
   if (typeof runsOn === 'string') return yamlScalar(runsOn);
   return `[${runsOn.map(yamlScalar).join(', ')}]`;
 }
+
+/** One OTA/native leg: an (optional app ×) build profile × platform. */
+export interface LegRef {
+  /** Monorepo app slug; omitted for single-app repos. */
+  appSlug?: string;
+  profile: string;
+  platform: 'android' | 'ios';
+}
+
+/**
+ * Git tag prefix marking "a native binary for this leg's runtimeVersion was
+ * shipped": `rnw/native/[<slug>/]<profile>/<platform>`. The full tag is
+ * `<prefix>/<hash>`; lookup via `git ls-remote`, durable unlike the cache.
+ */
+export function nativeTagPrefix({ appSlug, profile, platform }: LegRef): string {
+  return ['rnw', 'native', ...(appSlug ? [appSlug] : []), profile, platform].join('/');
+}
+
+/** Concurrency group serializing a leg's OTA publishes: `rnw-[<slug>-]<profile>-<platform>`. */
+export function legConcurrencyGroup({ appSlug, profile, platform }: LegRef): string {
+  return ['rnw', ...(appSlug ? [appSlug] : []), profile, platform].join('-');
+}

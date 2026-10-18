@@ -126,7 +126,7 @@ jobs:
         id: fp
         run: |
           HASH=$(npx --yes @expo/fingerprint . 2>/dev/null)
-          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
 
       - name: Check if native binary exists for this fingerprint
         if: ${{ matrix.ota }}

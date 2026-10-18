@@ -1,0 +1,23 @@
+<%#
+  Re-check the native release tag right before the store lane: a concurrent
+  or re-run job may have shipped this runtimeVersion since the fingerprint job.
+  Locals: tagPrefix, hashExpr (YAML-rendered values).
+  Step output: steps.recheck.outputs.exists.
+-%>
+      - name: Re-check native release tag
+        id: recheck
+        env:
+          RNW_TAG_PREFIX: <%- tagPrefix %>
+          RNW_HASH: <%- hashExpr %>
+        run: |
+          set -euo pipefail
+          rc=0
+          git ls-remote --exit-code --tags origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" > /dev/null || rc=$?
+          case "$rc" in
+            0)
+              echo "::notice::Native release $RNW_TAG_PREFIX/$RNW_HASH already exists on origin; skipping build, upload and tag"
+              echo "exists=true" >> "$GITHUB_OUTPUT" ;;
+            2) echo "exists=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
+          esac
+

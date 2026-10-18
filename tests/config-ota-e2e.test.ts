@@ -146,6 +146,11 @@ describe('ci.runners / ci.env', () => {
       ).toThrow();
     });
   }
+  it('rejects env key EXPO_UPDATES_FINGERPRINT_OVERRIDE (set by the native job)', () => {
+    expect(() =>
+      parseConfig(cfg({ ota: false, ci: ci('  env:\n    EXPO_UPDATES_FINGERPRINT_OVERRIDE: x\n') })),
+    ).toThrow(/reserved/);
+  });
   for (const val of ['"a\\nb"', '"a\'b"', '"a\\"b"', '"$X"', '"a b"']) {
     it(`rejects env value ${val}`, () => {
       expect(() =>

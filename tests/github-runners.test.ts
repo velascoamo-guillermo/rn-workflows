@@ -63,17 +63,22 @@ describe('per-app workflow', () => {
     expect(j['build-android']!.env).toEqual({ SENTRY_DISABLE_AUTO_UPLOAD: 'true' });
     expect(j['quality']!.env).toBeUndefined();
   });
-  test('smart (ota) workflow: env only on build jobs, self-hosted steps', () => {
+  test('smart (ota) workflow: env on native + ota jobs, self-hosted steps', () => {
     const cfg: Config = {
       ...withRunners,
       build: { production: { ...base.build.production!, ota: { server: 'https://o.example.com', channel: 'production' } } },
     };
     const j = jobs(generateGithubActions(cfg)[0]!.content);
-    expect(j['build-ios']!['runs-on']).toEqual(['self-hosted', 'macos-arm']);
-    expect(j['build-ios']!.env).toEqual({ SENTRY_DISABLE_AUTO_UPLOAD: 'true' });
+    expect(j['native-ios']!['runs-on']).toEqual(['self-hosted', 'macos-arm']);
+    expect(j['native-ios']!.env).toEqual({
+      SENTRY_DISABLE_AUTO_UPLOAD: 'true',
+      EXPO_UPDATES_FINGERPRINT_OVERRIDE: '${{ needs.fingerprint.outputs.ios_hash }}',
+    });
     expect(j['fingerprint']!.env).toBeUndefined();
-    expect(j['ota-update']!.env).toBeUndefined();
-    expect(j['build-ios']!.steps.some((s) => s.uses?.startsWith('ruby/setup-ruby'))).toBe(false);
+    // The OTA bundle must be exported with the same env as the native build (e.g. EXPO_PUBLIC_*).
+    expect(j['ota-ios']!['runs-on']).toEqual(['self-hosted', 'macos-arm']);
+    expect(j['ota-ios']!.env).toEqual({ SENTRY_DISABLE_AUTO_UPLOAD: 'true' });
+    expect(j['native-ios']!.steps.some((s) => s.uses?.startsWith('ruby/setup-ruby'))).toBe(false);
   });
   test('no runners/env: unchanged defaults', () => {
     const j = jobs(generateGithubActions(base)[0]!.content);

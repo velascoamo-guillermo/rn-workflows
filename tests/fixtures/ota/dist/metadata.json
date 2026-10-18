@@ -1,0 +1,15 @@
+{
+  "version": 0,
+  "bundler": "metro",
+  "fileMetadata": {
+    "ios": {
+      "bundle": "_expo/static/js/ios/entry-0123456789abcdef0123456789abcdef.hbc",
+      "assets": [
+        {
+          "path": "assets/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+          "ext": "png"
+        }
+      ]
+    }
+  }
+}

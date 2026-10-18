@@ -148,6 +148,7 @@ var RUNNER_LABEL_SAFE = /^[A-Za-z0-9_.-]+$/;
 var RunnerLabelsSchema = z.array(z.string().regex(RUNNER_LABEL_SAFE, "runner labels may only contain letters, digits, dot, hyphen, underscore")).min(1);
 var CI_ENV_KEY_SAFE = /^[A-Z][A-Z0-9_]*$/;
 var CI_ENV_RESERVED_PREFIX = /^(RNW_|GITHUB_|RUNNER_|ACTIONS_)/;
+var CI_ENV_RESERVED_KEYS = ["EXPO_UPDATES_FINGERPRINT_OVERRIDE"];
 var CI_ENV_VALUE_SAFE = /^[A-Za-z0-9_.:/@+,=-]*$/;
 var CiEnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
   for (const [key, value] of Object.entries(env)) {
@@ -155,6 +156,8 @@ var CiEnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
       ctx.addIssue({ code: "custom", path: [key], message: `ci.env key "${key}" must match ${CI_ENV_KEY_SAFE}` });
     } else if (CI_ENV_RESERVED_PREFIX.test(key)) {
       ctx.addIssue({ code: "custom", path: [key], message: `ci.env key "${key}" uses a reserved prefix (RNW_, GITHUB_, RUNNER_, ACTIONS_)` });
+    } else if (CI_ENV_RESERVED_KEYS.includes(key)) {
+      ctx.addIssue({ code: "custom", path: [key], message: `ci.env key "${key}" is reserved (set by the generated workflow)` });
     } else if (ALL_SECRET_NAMES.includes(key)) {
       ctx.addIssue({ code: "custom", path: [key], message: `ci.env key "${key}" is a secret name; secrets must not be set as plain env` });
     }
@@ -580,7 +583,7 @@ function resolveTemplate(relPath) {
   ];
   for (const p2 of candidates) {
     try {
-      return readFileSync3(p2, "utf8");
+      return { path: p2, source: readFileSync3(p2, "utf8") };
     } catch {}
   }
   throw new Error(`Template not found: ${relPath}`);
@@ -627,7 +630,7 @@ function yamlSingleQuoted(value) {
 function renderTemplate(relPath, data) {
   const tpl = resolveTemplate(relPath);
   const helpers = { rubyString, rubySymbol, yamlScalar, yamlSingleQuoted };
-  return ejs.render(tpl, { ...helpers, ...data }, { rmWhitespace: false });
+  return ejs.render(tpl.source, { ...helpers, ...data }, { rmWhitespace: false, filename: tpl.path });
 }
 
 // src/generators/fastlane.ts
@@ -756,6 +759,12 @@ function renderRunsOn(runsOn) {
     return yamlScalar(runsOn);
   return `[${runsOn.map(yamlScalar).join(", ")}]`;
 }
+function nativeTagPrefix({ appSlug, profile, platform }) {
+  return ["rnw", "native", ...appSlug ? [appSlug] : [], profile, platform].join("/");
+}
+function legConcurrencyGroup({ appSlug, profile, platform }) {
+  return ["rnw", ...appSlug ? [appSlug] : [], profile, platform].join("-");
+}
 
 // src/generators/github-actions.ts
 var DEFAULT_BRANCH = {
@@ -765,6 +774,13 @@ var DEFAULT_BRANCH = {
 };
 function branchFor(profileName) {
   return DEFAULT_BRANCH[profileName] ?? "main";
+}
+function expoCliFor(packageManager) {
+  if (packageManager === "bun")
+    return "bunx expo";
+  if (packageManager === "npm")
+    return "npx expo";
+  return "yarn expo";
 }
 function generateGithubActions(config, options = {}) {
   const packageManager = options.packageManager ?? "yarn";
@@ -790,7 +806,9 @@ function generateGithubActions(config, options = {}) {
         runsOn: renderRunsOn(runsOn),
         selfHosted: isSelfHosted(runsOn),
         env: jobEnv,
-        secrets: secretsFor(platform, profile.distribution)
+        secrets: secretsFor(platform, profile.distribution),
+        tagPrefix: yamlScalar(nativeTagPrefix({ appSlug: options.appSlug, profile: name, platform })),
+        concurrencyGroup: yamlScalar(legConcurrencyGroup({ appSlug: options.appSlug, profile: name, platform }))
       };
     });
     const checks = config.checks ?? {};
@@ -810,7 +828,11 @@ function generateGithubActions(config, options = {}) {
     const templateName = profile.ota ? "github/workflow-smart.ejs" : "github/workflow.ejs";
     const content = renderTemplate(templateName, {
       ...templateData,
-      ...profile.ota ? { ota: profile.ota } : {}
+      ...profile.ota ? {
+        otaServer: yamlScalar(profile.ota.server),
+        otaChannel: yamlScalar(profile.ota.channel),
+        expoCli: expoCliFor(packageManager)
+      } : {}
     });
     files.push({ path: `${workflowsDir}/${filename}`, content });
   }

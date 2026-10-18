@@ -1,0 +1,23 @@
+<%#
+  Mark "native binary shipped for this runtimeVersion". Must run after the
+  store/distribution lane succeeded; the job needs `contents: write`.
+  Idempotent: a tag already on origin (another run, or a job re-run) is success.
+  Locals: tagPrefix, hashExpr (YAML-rendered values), ifExpr (optional step `if:`).
+-%>
+      - name: Tag native release
+        id: tag
+<% if (typeof ifExpr !== 'undefined' && ifExpr) { -%>
+        if: <%- ifExpr %>
+<% } -%>
+        env:
+          RNW_TAG_PREFIX: <%- tagPrefix %>
+          RNW_HASH: <%- hashExpr %>
+        run: |
+          set -euo pipefail
+          rc=0
+          git ls-remote --exit-code --tags origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" > /dev/null || rc=$?
+          case "$rc" in
+            0) echo "Tag $RNW_TAG_PREFIX/$RNW_HASH already on origin; nothing to push" ;;
+            2) git tag "$RNW_TAG_PREFIX/$RNW_HASH" && git push origin "refs/tags/$RNW_TAG_PREFIX/$RNW_HASH" ;;
+            *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
+          esac

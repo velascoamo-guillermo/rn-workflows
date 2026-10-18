@@ -15,6 +15,50 @@ import yaml from "js-yaml";
 
 // src/config/schema.ts
 import { z } from "zod";
+
+// src/secrets.ts
+var ANDROID_SECRETS = {
+  firebase: ["FIREBASE_APP_ID_ANDROID", "FIREBASE_SERVICE_ACCOUNT_JSON"],
+  testflight: [],
+  "github-releases": ["GITHUB_TOKEN"],
+  store: ["PLAY_STORE_JSON_KEY"]
+};
+var APP_STORE_CONNECT_SECRETS = ["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_KEY_CONTENT", "ASC_KEY_IS_BASE64"];
+var IOS_SECRETS = {
+  firebase: ["FIREBASE_APP_ID_IOS", "FIREBASE_SERVICE_ACCOUNT_JSON"],
+  testflight: [...APP_STORE_CONNECT_SECRETS, "APPLE_TEAM_ID"],
+  "github-releases": ["GITHUB_TOKEN"],
+  store: [...APP_STORE_CONNECT_SECRETS, "APPLE_TEAM_ID"]
+};
+var IOS_SIGNING_SECRETS = ["MATCH_PASSWORD", "MATCH_GIT_URL"];
+var ALL_SECRET_NAMES = [
+  ...new Set([
+    ...Object.values(ANDROID_SECRETS).flat(),
+    ...Object.values(IOS_SECRETS).flat(),
+    ...IOS_SIGNING_SECRETS
+  ])
+].sort();
+function secretsFor(platform, distributionRaw) {
+  const targets = distributionRaw.split("+").map((s) => s.trim());
+  const map = platform === "android" ? ANDROID_SECRETS : IOS_SECRETS;
+  const set = new Set;
+  for (const target of targets) {
+    for (const secret of map[target] ?? [])
+      set.add(secret);
+  }
+  if (platform === "ios") {
+    for (const s of IOS_SIGNING_SECRETS)
+      set.add(s);
+  }
+  return [...set].sort();
+}
+function platformsFor(platform) {
+  if (platform === "all")
+    return ["android", "ios"];
+  return [platform];
+}
+
+// src/config/schema.ts
 var PLATFORMS = ["android", "ios", "all"];
 var DISTRIBUTIONS = [
   "firebase",
@@ -40,8 +84,10 @@ var DistributionStringSchema = z.string().min(1, "distribution cannot be empty")
     });
   }
 });
+var ANDROID_TRACKS = ["internal", "alpha", "beta", "production"];
 var AndroidBuildOptionsSchema = z.object({
-  buildType: z.enum(["apk", "aab"]).optional()
+  buildType: z.enum(["apk", "aab"]).optional(),
+  track: z.enum(ANDROID_TRACKS).optional()
 });
 var IosBuildOptionsSchema = z.object({
   exportMethod: z.enum(["app-store", "ad-hoc", "development"]).optional()
@@ -50,15 +96,29 @@ var OTA_SERVER_SAFE = /^https?:\/\/[A-Za-z0-9._~:/?#@%&=+-]+$/;
 var OTA_CHANNEL_SAFE = /^[A-Za-z0-9_.-]+$/;
 var OtaConfigSchema = z.object({
   server: z.string().min(1).regex(OTA_SERVER_SAFE, "ota.server must not contain whitespace or shell metacharacters"),
-  channel: z.string().min(1).regex(OTA_CHANNEL_SAFE, "ota.channel may only contain letters, digits, dot, hyphen, underscore")
+  channel: z.string().min(1).regex(OTA_CHANNEL_SAFE, "ota.channel may only contain letters, digits, dot, hyphen, underscore"),
+  stagingChannel: z.string().min(1).regex(OTA_CHANNEL_SAFE, "ota.stagingChannel may only contain letters, digits, dot, hyphen, underscore").optional()
 });
+var E2E_FLOWS_SAFE = /^[A-Za-z0-9_./-]+$/;
+var IOS_DEVICE_SAFE = /^[A-Za-z0-9 ()._-]+$/;
+var E2E_PLATFORMS = ["ios", "android"];
+var MaestroE2eSchema = z.object({
+  flows: z.string().min(1).regex(E2E_FLOWS_SAFE, "e2e.maestro.flows may only contain letters, digits, dot, slash, hyphen, underscore").refine((v) => !v.startsWith("/"), "e2e.maestro.flows must be a relative path").refine((v) => !v.split("/").includes(".."), 'e2e.maestro.flows must not contain ".."'),
+  platforms: z.array(z.enum(E2E_PLATFORMS)).min(1).optional(),
+  iosDevice: z.string().min(1).regex(IOS_DEVICE_SAFE, "e2e.maestro.iosDevice may only contain letters, digits, space, parentheses, dot, hyphen, underscore").optional()
+});
+var E2eConfigSchema = z.object({ maestro: MaestroE2eSchema });
 var BuildProfileSchema = z.object({
   platform: PlatformSchema,
   distribution: DistributionStringSchema,
   android: AndroidBuildOptionsSchema.optional(),
   ios: IosBuildOptionsSchema.optional(),
-  ota: OtaConfigSchema.optional()
+  ota: OtaConfigSchema.optional(),
+  e2e: E2eConfigSchema.optional()
 });
+function resolveStagingChannel(o) {
+  return o.stagingChannel ?? "staging";
+}
 var MatchConfigSchema = z.object({
   gitUrl: z.string().min(1, "match.gitUrl cannot be empty").regex(SINGLE_LINE_PATTERN, `match.gitUrl ${SINGLE_LINE_MESSAGE}`),
   storageMode: z.literal("git").optional()
@@ -81,10 +141,31 @@ var ChecksSchema = z.object({
   lint: z.boolean().optional(),
   typecheck: z.boolean().optional()
 });
+var RUNNER_LABEL_SAFE = /^[A-Za-z0-9_.-]+$/;
+var RunnerLabelsSchema = z.array(z.string().regex(RUNNER_LABEL_SAFE, "runner labels may only contain letters, digits, dot, hyphen, underscore")).min(1);
+var CI_ENV_KEY_SAFE = /^[A-Z][A-Z0-9_]*$/;
+var CI_ENV_RESERVED_PREFIX = /^(RNW_|GITHUB_|RUNNER_|ACTIONS_)/;
+var CI_ENV_VALUE_SAFE = /^[A-Za-z0-9_.:/@+,=-]*$/;
+var CiEnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
+  for (const [key, value] of Object.entries(env)) {
+    if (!CI_ENV_KEY_SAFE.test(key)) {
+      ctx.addIssue({ code: "custom", path: [key], message: `ci.env key "${key}" must match ${CI_ENV_KEY_SAFE}` });
+    } else if (CI_ENV_RESERVED_PREFIX.test(key)) {
+      ctx.addIssue({ code: "custom", path: [key], message: `ci.env key "${key}" uses a reserved prefix (RNW_, GITHUB_, RUNNER_, ACTIONS_)` });
+    } else if (ALL_SECRET_NAMES.includes(key)) {
+      ctx.addIssue({ code: "custom", path: [key], message: `ci.env key "${key}" is a secret name; secrets must not be set as plain env` });
+    }
+    if (!CI_ENV_VALUE_SAFE.test(value)) {
+      ctx.addIssue({ code: "custom", path: [key], message: `ci.env value for "${key}" may only contain letters, digits and _ . : / @ + , = -` });
+    }
+  }
+});
 var CiObjectSchema = z.object({
   provider: CiSchema,
   workflowsDir: z.string().min(1, "workflowsDir cannot be empty").regex(SINGLE_LINE_PATTERN, `workflowsDir ${SINGLE_LINE_MESSAGE}`).optional(),
-  extraPaths: z.array(z.string().min(1, "extraPaths entries cannot be empty").regex(SINGLE_LINE_PATTERN, `extraPaths entries ${SINGLE_LINE_MESSAGE}`)).optional()
+  extraPaths: z.array(z.string().min(1, "extraPaths entries cannot be empty").regex(SINGLE_LINE_PATTERN, `extraPaths entries ${SINGLE_LINE_MESSAGE}`)).optional(),
+  runners: z.object({ ios: RunnerLabelsSchema.optional(), android: RunnerLabelsSchema.optional() }).optional(),
+  env: CiEnvSchema.optional()
 });
 var BUILD_PROFILE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*$/;
 var ConfigSchema = z.object({
@@ -108,6 +189,39 @@ var ConfigSchema = z.object({
         path: ["build", name],
         message: `build profile name "${name}" may only contain letters, digits, hyphen, underscore, and must start with a letter (unsafe otherwise as a Fastlane lane name / shell argument)`
       });
+    }
+    const stagingChannel = profile.ota ? resolveStagingChannel(profile.ota) : undefined;
+    if (profile.ota && profile.ota.stagingChannel === profile.ota.channel) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["build", name, "ota", "stagingChannel"],
+        message: "ota.stagingChannel must differ from ota.channel"
+      });
+    }
+    if (profile.e2e) {
+      if (!profile.ota) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["build", name, "e2e"],
+          message: "e2e requires an ota block (e2e runs against the staging OTA channel)"
+        });
+      } else if (stagingChannel === profile.ota.channel) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["build", name, "ota", "stagingChannel"],
+          message: `e2e requires ota.stagingChannel to differ from ota.channel ("${profile.ota.channel}"); set ota.stagingChannel`
+        });
+      }
+      const allowed = platformsFor(profile.platform);
+      for (const plat of profile.e2e.maestro.platforms ?? []) {
+        if (!allowed.includes(plat)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["build", name, "e2e", "maestro", "platforms"],
+            message: `e2e platform "${plat}" is not covered by build profile platform "${profile.platform}"`
+          });
+        }
+      }
     }
     const targets = profile.distribution.split("+").map((s) => s.trim());
     const touchesIos = profile.platform === "ios" || profile.platform === "all";
@@ -143,6 +257,10 @@ var ConfigSchema = z.object({
     out.workflowsDir = ci.workflowsDir;
   if (ci.extraPaths !== undefined)
     out.extraPaths = ci.extraPaths;
+  if (ci.runners !== undefined)
+    out.runners = ci.runners;
+  if (ci.env !== undefined)
+    out.env = ci.env;
   return out;
 });
 
@@ -616,41 +734,6 @@ function generateFastlane(config, options = {}) {
     files.push({ path: "fastlane/Matchfile", content: matchfile });
   }
   return files;
-}
-
-// src/secrets.ts
-var ANDROID_SECRETS = {
-  firebase: ["FIREBASE_APP_ID_ANDROID", "FIREBASE_SERVICE_ACCOUNT_JSON"],
-  testflight: [],
-  "github-releases": ["GITHUB_TOKEN"],
-  store: ["PLAY_STORE_JSON_KEY"]
-};
-var APP_STORE_CONNECT_SECRETS = ["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_KEY_CONTENT", "ASC_KEY_IS_BASE64"];
-var IOS_SECRETS = {
-  firebase: ["FIREBASE_APP_ID_IOS", "FIREBASE_SERVICE_ACCOUNT_JSON"],
-  testflight: [...APP_STORE_CONNECT_SECRETS, "APPLE_TEAM_ID"],
-  "github-releases": ["GITHUB_TOKEN"],
-  store: [...APP_STORE_CONNECT_SECRETS, "APPLE_TEAM_ID"]
-};
-var IOS_SIGNING_SECRETS = ["MATCH_PASSWORD", "MATCH_GIT_URL"];
-function secretsFor(platform, distributionRaw) {
-  const targets = distributionRaw.split("+").map((s) => s.trim());
-  const map = platform === "android" ? ANDROID_SECRETS : IOS_SECRETS;
-  const set = new Set;
-  for (const target of targets) {
-    for (const secret of map[target] ?? [])
-      set.add(secret);
-  }
-  if (platform === "ios") {
-    for (const s of IOS_SIGNING_SECRETS)
-      set.add(s);
-  }
-  return [...set].sort();
-}
-function platformsFor(platform) {
-  if (platform === "all")
-    return ["android", "ios"];
-  return [platform];
 }
 
 // src/generators/github-actions.ts

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ALL_SECRET_NAMES, platformsFor } from '../secrets.ts';
 
 export const PLATFORMS = ['android', 'ios', 'all'] as const;
 export const DISTRIBUTIONS = [
@@ -46,8 +47,12 @@ const DistributionStringSchema = z
     }
   });
 
+export const ANDROID_TRACKS = ['internal', 'alpha', 'beta', 'production'] as const;
+export type AndroidTrack = (typeof ANDROID_TRACKS)[number];
+
 export const AndroidBuildOptionsSchema = z.object({
   buildType: z.enum(['apk', 'aab']).optional(),
+  track: z.enum(ANDROID_TRACKS).optional(),
 });
 
 export const IosBuildOptionsSchema = z.object({
@@ -76,9 +81,43 @@ export const OtaConfigSchema = z.object({
       OTA_CHANNEL_SAFE,
       'ota.channel may only contain letters, digits, dot, hyphen, underscore',
     ),
+  stagingChannel: z
+    .string()
+    .min(1)
+    .regex(
+      OTA_CHANNEL_SAFE,
+      'ota.stagingChannel may only contain letters, digits, dot, hyphen, underscore',
+    )
+    .optional(),
 });
 
 export type OtaConfig = z.infer<typeof OtaConfigSchema>;
+
+// `flows` and `iosDevice` reach shell commands in generated workflows: charset
+// whitelists, not escaping. Flow paths must stay inside the repo checkout.
+const E2E_FLOWS_SAFE = /^[A-Za-z0-9_./-]+$/;
+const IOS_DEVICE_SAFE = /^[A-Za-z0-9 ()._-]+$/;
+
+export const E2E_PLATFORMS = ['ios', 'android'] as const;
+
+export const MaestroE2eSchema = z.object({
+  flows: z
+    .string()
+    .min(1)
+    .regex(E2E_FLOWS_SAFE, 'e2e.maestro.flows may only contain letters, digits, dot, slash, hyphen, underscore')
+    .refine((v) => !v.startsWith('/'), 'e2e.maestro.flows must be a relative path')
+    .refine((v) => !v.split('/').includes('..'), 'e2e.maestro.flows must not contain ".."'),
+  platforms: z.array(z.enum(E2E_PLATFORMS)).min(1).optional(),
+  iosDevice: z
+    .string()
+    .min(1)
+    .regex(IOS_DEVICE_SAFE, 'e2e.maestro.iosDevice may only contain letters, digits, space, parentheses, dot, hyphen, underscore')
+    .optional(),
+});
+
+export const E2eConfigSchema = z.object({ maestro: MaestroE2eSchema });
+
+export type MaestroE2e = z.infer<typeof MaestroE2eSchema>;
 
 export const BuildProfileSchema = z.object({
   platform: PlatformSchema,
@@ -86,9 +125,26 @@ export const BuildProfileSchema = z.object({
   android: AndroidBuildOptionsSchema.optional(),
   ios: IosBuildOptionsSchema.optional(),
   ota: OtaConfigSchema.optional(),
+  e2e: E2eConfigSchema.optional(),
 });
 
 export type BuildProfile = z.infer<typeof BuildProfileSchema>;
+
+/** Explicit `android.track` > `internal` when OTA is configured > `production`. */
+export function resolveAndroidTrack(p: BuildProfile): AndroidTrack {
+  return p.android?.track ?? (p.ota !== undefined ? 'internal' : 'production');
+}
+
+export function resolveStagingChannel(o: OtaConfig): string {
+  return o.stagingChannel ?? 'staging';
+}
+
+/** `e2e.maestro.platforms` or, by default, the profile's own platforms. */
+export function e2ePlatforms(p: BuildProfile): Array<'ios' | 'android'> {
+  const declared = p.e2e?.maestro.platforms;
+  if (declared !== undefined) return [...declared];
+  return E2E_PLATFORMS.filter((x) => p.platform === 'all' || p.platform === x);
+}
 
 export const MatchConfigSchema = z.object({
   /** Git repo storing the `fastlane match` certificates/profiles. */
@@ -162,6 +218,33 @@ export const ChecksSchema = z.object({
 
 export type Checks = z.infer<typeof ChecksSchema>;
 
+const RUNNER_LABEL_SAFE = /^[A-Za-z0-9_.-]+$/;
+const RunnerLabelsSchema = z
+  .array(z.string().regex(RUNNER_LABEL_SAFE, 'runner labels may only contain letters, digits, dot, hyphen, underscore'))
+  .min(1);
+
+// ci.env entries become workflow-level `env:` values; keys must not shadow
+// reserved/secret names and values are a strict charset (no quotes, `$`,
+// whitespace or newlines).
+const CI_ENV_KEY_SAFE = /^[A-Z][A-Z0-9_]*$/;
+const CI_ENV_RESERVED_PREFIX = /^(RNW_|GITHUB_|RUNNER_|ACTIONS_)/;
+const CI_ENV_VALUE_SAFE = /^[A-Za-z0-9_.:/@+,=-]*$/;
+
+const CiEnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
+  for (const [key, value] of Object.entries(env)) {
+    if (!CI_ENV_KEY_SAFE.test(key)) {
+      ctx.addIssue({ code: 'custom', path: [key], message: `ci.env key "${key}" must match ${CI_ENV_KEY_SAFE}` });
+    } else if (CI_ENV_RESERVED_PREFIX.test(key)) {
+      ctx.addIssue({ code: 'custom', path: [key], message: `ci.env key "${key}" uses a reserved prefix (RNW_, GITHUB_, RUNNER_, ACTIONS_)` });
+    } else if ((ALL_SECRET_NAMES as readonly string[]).includes(key)) {
+      ctx.addIssue({ code: 'custom', path: [key], message: `ci.env key "${key}" is a secret name; secrets must not be set as plain env` });
+    }
+    if (!CI_ENV_VALUE_SAFE.test(value)) {
+      ctx.addIssue({ code: 'custom', path: [key], message: `ci.env value for "${key}" may only contain letters, digits and _ . : / @ + , = -` });
+    }
+  }
+});
+
 export const CiObjectSchema = z.object({
   provider: CiSchema,
   workflowsDir: z
@@ -177,6 +260,10 @@ export const CiObjectSchema = z.object({
         .regex(SINGLE_LINE_PATTERN, `extraPaths entries ${SINGLE_LINE_MESSAGE}`),
     )
     .optional(),
+  runners: z
+    .object({ ios: RunnerLabelsSchema.optional(), android: RunnerLabelsSchema.optional() })
+    .optional(),
+  env: CiEnvSchema.optional(),
 });
 
 export interface Config {
@@ -191,6 +278,10 @@ export interface Config {
    * `on.push.paths` filter of monorepo per-app workflows (shared packages).
    */
   extraPaths?: string[];
+  /** From `ci.runners` — runner labels per platform job. */
+  runners?: { ios?: string[]; android?: string[] };
+  /** From `ci.env` — extra non-secret env vars for generated workflows. */
+  env?: Record<string, string>;
 }
 
 const BUILD_PROFILE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*$/;
@@ -222,6 +313,40 @@ export const ConfigSchema = z
           path: ['build', name],
           message: `build profile name "${name}" may only contain letters, digits, hyphen, underscore, and must start with a letter (unsafe otherwise as a Fastlane lane name / shell argument)`,
         });
+      }
+
+      const stagingChannel = profile.ota ? resolveStagingChannel(profile.ota) : undefined;
+      if (profile.ota && profile.ota.stagingChannel === profile.ota.channel) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['build', name, 'ota', 'stagingChannel'],
+          message: 'ota.stagingChannel must differ from ota.channel',
+        });
+      }
+      if (profile.e2e) {
+        if (!profile.ota) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['build', name, 'e2e'],
+            message: 'e2e requires an ota block (e2e runs against the staging OTA channel)',
+          });
+        } else if (stagingChannel === profile.ota.channel) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['build', name, 'ota', 'stagingChannel'],
+            message: `e2e requires ota.stagingChannel to differ from ota.channel ("${profile.ota.channel}"); set ota.stagingChannel`,
+          });
+        }
+        const allowed = platformsFor(profile.platform);
+        for (const plat of profile.e2e.maestro.platforms ?? []) {
+          if (!allowed.includes(plat)) {
+            ctx.addIssue({
+              code: 'custom',
+              path: ['build', name, 'e2e', 'maestro', 'platforms'],
+              message: `e2e platform "${plat}" is not covered by build profile platform "${profile.platform}"`,
+            });
+          }
+        }
       }
 
       const targets = profile.distribution.split('+').map((s) => s.trim());
@@ -258,5 +383,7 @@ export const ConfigSchema = z
     if (cfg.checks !== undefined) out.checks = cfg.checks;
     if (ci.workflowsDir !== undefined) out.workflowsDir = ci.workflowsDir;
     if (ci.extraPaths !== undefined) out.extraPaths = ci.extraPaths;
+    if (ci.runners !== undefined) out.runners = ci.runners;
+    if (ci.env !== undefined) out.env = ci.env;
     return out;
   });

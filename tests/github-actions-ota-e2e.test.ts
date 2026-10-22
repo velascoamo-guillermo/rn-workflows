@@ -189,6 +189,14 @@ describe('native-<p> with e2e: binary → flows (no guard) → fastlane → tag'
     }
   });
 
+  test('OTA ship path has no native-project restore step (nothing uses the native dir afterwards)', () => {
+    for (const p of ['ios', 'android'] as const) {
+      expect(all.jobs[`ota-${p}`]!.steps.some((s) => (s.id ?? '').endsWith('e2e-unpatch'))).toBe(false);
+      expect(all.jobs[`native-${p}`]!.steps.some(byId('ota-e2e-unpatch'))).toBe(false);
+      expect(all.jobs[`native-${p}`]!.steps.some(byId('e2e-unpatch'))).toBe(true);
+    }
+  });
+
   test('bare project: git checkout of the native dir', () => {
     const bare: Config = { ...allCfg, project: { ...allCfg.project, type: 'bare' } };
     const wf = parseWorkflow(generateGithubActions(bare, { scheme: 'OtaAll' })[0]!.content);
@@ -213,7 +221,8 @@ describe('platform coverage', () => {
     expect(noE2eContent).not.toContain('upload-staging');
     expect(noE2eContent).not.toContain('maestro');
     expect(noE2eContent).not.toContain('actions/cache');
-    expect(noE2eContent).not.toContain('promote');
+    expect(noE2eContent).not.toContain('id: promote');
+    expect(noE2eContent).not.toContain('Promote OTA update');
   });
 
   test('ios-only e2e profile has no android e2e', () => {
@@ -255,7 +264,7 @@ describe('platform coverage', () => {
 
 describe('native-<p>: recheck hit ships this commit as an OTA instead of skipping (#54 M-1)', () => {
   const running = (job: WorkflowJob, exists: string): string[] =>
-    job.steps.filter((s) => stepRuns(s, { steps: { recheck: { exists } } })).map((s) => s.id ?? s.name ?? '');
+    job.steps.filter((s) => stepRuns(s, { steps: { recheck: { exists }, 'ota-fresh': { promote: 'true' }, 'ota-fresh-direct': { promote: 'true' } } })).map((s) => s.id ?? s.name ?? '');
   const ordered = (ran: string[], ids: string[]): void => {
     const at = ids.map((id) => ran.indexOf(id));
     expect({ ids, at: at.every((i) => i >= 0) }).toEqual({ ids, at: true });
@@ -270,7 +279,7 @@ describe('native-<p>: recheck hit ships this commit as an OTA instead of skippin
       const ran = running(job, 'true');
       expect(ran.some((id) => job.steps.find((s) => (s.id ?? s.name) === id && isFastlane(s)))).toBe(false);
       expect(ran).not.toContain('tag');
-      ordered(ran, ['recheck', 'ota-update-id', 'ota-upload-staging', 'ota-e2e-cache', 'ota-e2e-build', 'ota-guard-flow', 'ota-maestro', 'ota-promote']);
+      ordered(ran, ['recheck', 'ota-update-id', 'ota-upload-staging', 'ota-e2e-cache', 'ota-e2e-build', 'ota-guard-flow', 'ota-maestro', 'ota-fresh', 'ota-promote']);
       expect(ran.at(-1)).toBe('ota-promote');
       expect(step(job, 'ota-upload-staging').env?.RNW_CHANNEL).toBe('staging');
       expect(step(job, 'ota-promote').env?.RNW_CHANNEL).toBe('production');
@@ -295,7 +304,7 @@ describe('native-<p>: recheck hit ships this commit as an OTA instead of skippin
     test(`${p} e2e: OTA branch scripts byte-identical to ota-${p}`, () => {
       const job = all.jobs[`native-${p}`]!;
       const ota = all.jobs[`ota-${p}`]!;
-      for (const id of ['export', 'package', 'update-id', 'upload-staging', 'guard-flow', 'promote', 'e2e-build', 'e2e-patch']) {
+      for (const id of ['export', 'package', 'update-id', 'upload-staging', 'guard-flow', 'fresh', 'promote', 'e2e-build', 'e2e-patch']) {
         expect({ id, run: step(job, `ota-${id}`).run }).toEqual({ id, run: step(ota, id).run });
       }
     });
@@ -303,7 +312,7 @@ describe('native-<p>: recheck hit ships this commit as an OTA instead of skippin
     test(`${p} no e2e: hit → package → upload to the channel; no fastlane/tag`, () => {
       const job = noE2e.jobs[`native-${p}`]!;
       const ran = running(job, 'true');
-      ordered(ran, ['recheck', 'ota-update-id', 'ota-upload']);
+      ordered(ran, ['recheck', 'ota-update-id', 'ota-fresh-direct', 'ota-upload']);
       expect(ran).not.toContain('tag');
       expect(job.steps.filter((s) => stepRuns(s, { steps: { recheck: { exists: 'true' } } })).some(isFastlane)).toBe(false);
       expect(step(job, 'ota-upload').env?.RNW_CHANNEL).toBe('production');

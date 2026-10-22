@@ -2,7 +2,8 @@
   iOS e2e test binary: Release simulator build (unsigned) whose expo-updates
   config points at the staging channel, cached by runtimeVersion at
   $RUNNER_TEMP/rnw-e2e/ios/app.app. The store binary is never patched: the
-  native dir is restored right after the test build.
+  native dir is restored right after the test build on the native path (the
+  OTA path never builds a store binary, so it skips the restore).
   Locals: e2e (view from github-actions.ts), expoCli, projectType, hashExpr,
   restore (bool: OTA path restores/saves the cache and skips the build on a
   hit; the native path always builds fresh and saves after its flows pass),
@@ -80,6 +81,7 @@
 <% if (restore) { -%>
 <%- include('e2e-save-step', { platform: 'ios' }) -%>
 <% } -%>
+<% if (!restore) { -%>
       - name: Restore native project after the test build (ios)
         id: <%= idPrefix %>e2e-unpatch
 <% if (buildIf) { -%>
@@ -93,3 +95,4 @@
         run: git checkout -- ios
 <% } -%>
 
+<% } -%>

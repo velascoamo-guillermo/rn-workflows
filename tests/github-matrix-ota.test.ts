@@ -381,6 +381,36 @@ describe('plan select step (change detection)', () => {
     expect((await runSelect(dir, { RNW_BEFORE: base })).keys).toEqual([]);
   });
 
+  test('apps/foo and apps/foobar: a change in one never selects the other (M-9)', async () => {
+    const pair = render([
+      { dir: 'apps/foo', slug: 'foo', config: otaAndroid },
+      { dir: 'apps/foobar', slug: 'foobar', config: otaAndroid },
+    ]);
+    const pairPlan = job(pair, 'plan');
+    const pairSelect = getStep(pair, 'plan', 'select');
+    const run = async (file: string): Promise<string[]> => {
+      const { dir, base } = repo();
+      commitFile(dir, file);
+      const r = await runStep(pairSelect, {
+        cwd: dir,
+        env: {
+          RELEASE_LEGS: pairPlan.env!['RELEASE_LEGS']!,
+          QUALITY_LEGS: pairPlan.env!['QUALITY_LEGS']!,
+          APP_FILTER: '',
+          RNW_BEFORE: base,
+          GITHUB_EVENT_NAME: 'push',
+          GITHUB_REF_TYPE: 'branch',
+          GITHUB_REF_NAME: 'main',
+          GITHUB_SHA: git(dir, 'rev-parse', 'HEAD'),
+        },
+      });
+      expect(r.code).toBe(0);
+      return (JSON.parse(r.outputs['selected']!) as Leg[]).map((l) => l.app);
+    };
+    expect(await run('apps/foobar/src/index.ts')).toEqual(['foobar']);
+    expect(await run('apps/foo/src/index.ts')).toEqual(['foo']);
+  });
+
   test('a change under a shared extraPath selects every app that declares it', async () => {
     const { dir, base } = repo();
     commitFile(dir, 'packages/kit/index.ts');
@@ -624,8 +654,8 @@ describe('matrix e2e legs (#54)', () => {
 
   for (const p of ['ios', 'android'] as const) {
     test(`ota ${p} e2e leg: package → upload(staging) → binary → guard → flows → promote`, () => {
-      const ran = running(ota, { matrix: leg(p, true) });
-      const order = ['update-id', 'upload-staging', `${p}-e2e-build`, `${p}-guard-flow`, `${p}-maestro`, 'promote'];
+      const ran = running(ota, { matrix: leg(p, true), steps: { fresh: { promote: 'true' } } });
+      const order = ['update-id', 'upload-staging', `${p}-e2e-build`, `${p}-guard-flow`, `${p}-maestro`, 'fresh', 'promote'];
       const at = order.map((id) => ran.indexOf(id));
       expect(at.every((i) => i >= 0)).toBe(true);
       expect([...at].sort((a, b) => a - b)).toEqual(at);
@@ -656,8 +686,10 @@ describe('matrix e2e legs (#54)', () => {
     });
 
     test(`ota ${p} leg without e2e uploads straight to the channel`, () => {
-      const ran = running(ota, { matrix: leg(p, false) });
+      const ran = running(ota, { matrix: leg(p, false), steps: { 'fresh-direct': { promote: 'true' } } });
       expect(ran).toContain('upload');
+      expect(ran.indexOf('fresh-direct')).toBeLessThan(ran.indexOf('upload'));
+      expect(running(ota, { matrix: leg(p, false), steps: { 'fresh-direct': { promote: 'false' } } })).not.toContain('upload');
       for (const id of ['upload-staging', 'promote', `${p}-maestro`, `${p}-e2e-build`]) expect(ran).not.toContain(id);
     });
 
@@ -674,10 +706,10 @@ describe('matrix e2e legs (#54)', () => {
     });
 
     test(`native ${p}: recheck hit ships this commit as an OTA (staging → e2e → promote), no fastlane/tag`, () => {
-      const ran = running(native, { matrix: leg(p, true), steps: { recheck: { exists: 'true' } } });
+      const ran = running(native, { matrix: leg(p, true), steps: { recheck: { exists: 'true' }, 'ota-fresh': { promote: 'true' } } });
       expect(ran).not.toContain('fastlane');
       expect(ran).not.toContain('tag');
-      const order = ['ota-update-id', 'ota-upload-staging', `ota-${p}-e2e-cache`, `ota-${p}-e2e-build`, `ota-${p}-guard-flow`, `ota-${p}-maestro`, 'ota-promote'];
+      const order = ['ota-update-id', 'ota-upload-staging', `ota-${p}-e2e-cache`, `ota-${p}-e2e-build`, `ota-${p}-guard-flow`, `ota-${p}-maestro`, 'ota-fresh', 'ota-promote'];
       const at = order.map((id) => ran.indexOf(id));
       expect(at.every((i) => i >= 0)).toBe(true);
       expect([...at].sort((a, b) => a - b)).toEqual(at);
@@ -690,8 +722,10 @@ describe('matrix e2e legs (#54)', () => {
     });
 
     test(`native ${p}: recheck hit without e2e uploads straight to the channel`, () => {
-      const ran = running(native, { matrix: leg(p, false), steps: { recheck: { exists: 'true' } } });
+      const ran = running(native, { matrix: leg(p, false), steps: { recheck: { exists: 'true' }, 'ota-fresh-direct': { promote: 'true' } } });
       expect(ran).toContain('ota-upload');
+      expect(ran.indexOf('ota-fresh-direct')).toBeLessThan(ran.indexOf('ota-upload'));
+      expect(running(native, { matrix: leg(p, false), steps: { recheck: { exists: 'true' }, 'ota-fresh-direct': { promote: 'false' } } })).not.toContain('ota-upload');
       expect(ran.indexOf('ota-upload')).toBeGreaterThan(ran.indexOf('ota-update-id'));
       for (const id of ['fastlane', 'tag', 'ota-upload-staging', 'ota-promote', `ota-${p}-maestro`]) expect(ran).not.toContain(id);
       expect(step(native, 'ota-upload').env?.['RNW_CHANNEL']).toBe('${{ matrix.otaChannel }}');

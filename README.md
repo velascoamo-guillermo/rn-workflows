@@ -102,7 +102,7 @@ project:
 
 ## OTA updates and Maestro e2e (GitHub Actions)
 
-Opt a build profile into a fingerprint-driven pipeline with `ota` (and optionally `e2e.maestro`). On push, each platform is routed independently: if a native release already exists for its fingerprint the change ships as an OTA update (uploaded to the staging channel, e2e-tested, then auto-promoted to the production channel); otherwise a native binary is built, e2e-tested, and uploaded to TestFlight / Play internal.
+Opt a build profile into a fingerprint-driven pipeline with `ota` (and optionally `e2e.maestro`). On push, each platform is routed independently: if a native release already exists for its fingerprint the change ships as an OTA update (uploaded to the staging channel, e2e-tested, then auto-promoted to the production channel); otherwise a native binary is built, e2e-tested, and uploaded to TestFlight / Play internal. Native lanes stop at the testing track (a `store` target uploads to TestFlight, not App Store review) and set their own build numbers: latest TestFlight build + 1 on iOS, highest Play versionCode + 1 on Android.
 
 ```yaml
 ci:
@@ -189,7 +189,7 @@ Either way, `SETUP.md` is added next to `fastlane/` whenever the config requires
 
 ## Monorepos (matrix mode)
 
-`rn-workflows generate --matrix` discovers every `rn-workflows.yml` under the git root and emits a single `strategy.matrix` release workflow (GitHub Actions only). Fastlane files stay per-app — run plain `generate` inside each app directory.
+`rn-workflows generate --matrix` discovers every `rn-workflows.yml` under the git root and emits a single `strategy.matrix` release workflow (GitHub Actions only). Use `generate --matrix` for CI, and run plain `generate` inside each app directory for its Fastlane files only: when `<git root>/.github/workflows/rn-release-matrix.yml` exists, per-app `generate` skips the per-app workflow automatically (a second push-triggered pipeline per app would duplicate every release).
 
 Where workflow files are written:
 

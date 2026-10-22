@@ -65,6 +65,16 @@ describe('checkOtaReadiness', () => {
     const notes = messages('ready', profile({ e2e: undefined }), 'note').join('\n');
     expect(notes).toContain('e2e');
   });
+  test('notes untested OTA per platform when e2e.maestro.platforms omits one', () => {
+    const notes = messages('ready', profile({ e2e: { maestro: { flows: '.maestro', platforms: ['ios'] } } }), 'note');
+    const untested = notes.filter((n) => n.includes('untested'));
+    expect(untested).toHaveLength(1);
+    expect(untested[0]).toContain('android');
+  });
+  test('no per-platform untested note when e2e covers every profile platform', () => {
+    const p = profile({ platform: 'ios', e2e: { maestro: { flows: '.maestro', platforms: ['ios'] } } });
+    expect(messages('ready', p, 'note').join('\n')).not.toContain('untested');
+  });
   test('no untested note when e2e is configured', () => {
     expect(messages('ready', profile(), 'note').join('\n')).not.toContain('untested');
   });

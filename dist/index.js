@@ -734,13 +734,16 @@ function toAndroidView(name, profile) {
     gradleTask: isAab ? "bundle" : "assemble",
     isAab,
     androidArtifactPath: artifactPath,
-    track: resolveAndroidTrack(profile)
+    track: resolveAndroidTrack(profile),
+    bumpVersionCode: profile.ota !== undefined && targets.includes("store")
   };
 }
 function toIosView(name, profile, bundleId, scheme) {
   const exportMethod = profile.ios?.exportMethod ?? "app-store";
   const targets = profile.distribution.split("+").map((s) => s.trim());
   const matchType = matchTypeFor(exportMethod);
+  const hasOta = profile.ota !== undefined;
+  const wantsStore = targets.includes("store");
   return {
     name,
     description: `Build ${name} (ios)`,
@@ -750,7 +753,10 @@ function toIosView(name, profile, bundleId, scheme) {
     provisioningProfileName: provisioningProfileName(matchType, bundleId),
     codeSignIdentity: CODE_SIGN_IDENTITY[matchType],
     xcWorkspace: scheme,
-    xcScheme: scheme
+    xcScheme: scheme,
+    uploadToTestflight: targets.includes("testflight") || hasOta && wantsStore,
+    uploadToAppStore: wantsStore && !hasOta,
+    bumpBuildNumber: hasOta && (targets.includes("testflight") || wantsStore)
   };
 }
 function generateFastlane(config, options = {}) {
@@ -1285,7 +1291,14 @@ function checkOtaReadiness(appDir, profileName, profile) {
   }
   if (!profile.e2e) {
     note(`Profile "${profileName}": OTA updates ship untested — add an e2e (Maestro) block to run flows against the staging channel before promotion.`);
-  } else if (e2ePlatforms(profile).includes("android")) {
+  } else {
+    const tested = e2ePlatforms(profile);
+    const shipped = E2E_PLATFORMS.filter((x) => profile.platform === "all" || profile.platform === x);
+    for (const p2 of shipped.filter((x) => !tested.includes(x))) {
+      note(`Profile "${profileName}": ${p2} OTA updates ship untested — e2e.maestro.platforms omits ${p2}, so its updates go straight to the production channel.`);
+    }
+  }
+  if (profile.e2e && e2ePlatforms(profile).includes("android")) {
     const host = hostOf(ota.server)?.replace(/:\d+$/, "");
     if (host && LOCAL_HOSTS.has(host)) {
       warn(`Profile "${profileName}": Android e2e runs on an emulator where localhost is the emulator itself, but ota.server is ${ota.server} — use a reachable hostname.`);
@@ -1526,6 +1539,13 @@ function resolveMatrixSetupMdPath(gitRoot) {
     return { path: "SETUP.md", redirected: false };
   return { path: "rn-workflows.SETUP.md", redirected: true };
 }
+function findMatrixWorkflow(gitRoot, workflowsDir) {
+  const candidates = [
+    ...gitRoot ? [join3(gitRoot, ".github", "workflows", MATRIX_WORKFLOW_FILENAME)] : [],
+    join3(workflowsDir, MATRIX_WORKFLOW_FILENAME)
+  ];
+  return candidates.find((c) => existsSync2(c)) ?? null;
+}
 function collectOtaReadiness(config, appDir, app) {
   return Object.entries(config.build).filter(([, profile]) => profile.ota).map(([name, profile]) => ({
     ...app ? { app } : {},
@@ -1642,11 +1662,19 @@ var generate_default = defineCommand2({
       ...gitRoot ? { workflowsPathFromRoot: toPosixRelative(gitRoot, workflowsDir) } : {}
     };
     const requiredSecrets = deriveRequiredSecrets(config);
-    const otaReports = collectOtaReadiness(config, appDirAbs);
+    const otaProfiles = Object.entries(config.build).filter(([, profile]) => profile.ota);
+    if (config.ci !== "github-actions" && otaProfiles.length > 0) {
+      p2.log.warn(`ota/e2e are ignored for ${config.ci}: the fingerprint OTA + Maestro pipeline is GitHub Actions only (profiles: ${otaProfiles.map(([name]) => name).join(", ")}). A plain release pipeline was generated.`);
+    }
+    const otaReports = config.ci === "github-actions" ? collectOtaReadiness(config, appDirAbs) : [];
     logOtaFindings(otaReports);
+    const matrixWorkflow = config.ci === "github-actions" ? findMatrixWorkflow(gitRoot, workflowsDir) : null;
+    if (matrixWorkflow) {
+      p2.log.info(`The matrix workflow owns CI for this repo (${matrixWorkflow}) — skipping the per-app workflow; only Fastlane files (and SETUP.md) were written.`);
+    }
     const files = [
       ...generateFastlane(config, { packageManager, scheme: detectedScheme }),
-      ...config.ci === "github-actions" ? generateGithubActions(config, githubOptions) : generateGitlab(config),
+      ...config.ci === "github-actions" ? matrixWorkflow ? [] : generateGithubActions(config, githubOptions) : generateGitlab(config),
       ...requiredSecrets.length > 0 ? [{ path: "SETUP.md", content: buildSetupMarkdown(requiredSecrets, config.ci, [buildOtaSetupSection(otaReports)]) }] : []
     ];
     writeFiles(files, {

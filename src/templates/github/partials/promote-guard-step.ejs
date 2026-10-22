@@ -1,0 +1,78 @@
+<%#
+  Never ship a stale commit: right before promote (or the direct production
+  upload), skip ONLY when it is safe — a later run is guaranteed to re-ship
+  this same leg. All of these must hold to promote:
+    1. the run ref is refs/heads/<profile branch> (not a tag / other branch);
+    2. $GITHUB_SHA is an ancestor of origin/<branch> (not rewritten history);
+    3. (scope != 'none') no newer commit on origin/<branch> touches this leg's
+       trigger paths. 'legs' = matrix.paths, the exact set "Select legs"
+       selects this leg by; 'repo' = whole repo (smart workflow: any push
+       re-runs the pipeline).
+  Otherwise promote is skipped with a notice (the staging upload + e2e stand)
+  and the step succeeds. An unreachable origin fails the step instead.
+  Locals: stepId, branchExpr (YAML-rendered value), gate (bare `if:` or ''),
+  scope ('none' | 'repo' | 'legs'), pathsExpr (YAML value; scope 'legs' only).
+  Step output: steps.<stepId>.outputs.promote ('true' | 'false').
+-%>
+      - name: Check this commit is safe to promote
+        id: <%= stepId %>
+<% if (gate) { -%>
+        if: <%- gate %>
+<% } -%>
+        env:
+          RNW_BRANCH: <%- branchExpr %>
+          RNW_SCOPE: <%= scope %>
+<% if (scope === 'legs') { -%>
+          RNW_PATHS: <%- pathsExpr %>
+<% } -%>
+        run: |
+          set -euo pipefail
+          skip() {
+            echo "::notice::$1 The staging upload and e2e stand."
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          if [ "${GITHUB_REF:-}" != "refs/heads/$RNW_BRANCH" ]; then
+            skip "Not a run on branch $RNW_BRANCH (${GITHUB_REF:-?}); skipping promote."
+          fi
+          rc=0
+          git ls-remote --exit-code origin "refs/heads/$RNW_BRANCH" > /dev/null || rc=$?
+          case "$rc" in
+            0) ;;
+            2) skip "origin has no branch $RNW_BRANCH; skipping promote." ;;
+            *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
+          esac
+          REFSPEC="+refs/heads/$RNW_BRANCH:refs/remotes/origin/$RNW_BRANCH"
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch -q --no-tags --unshallow origin "$REFSPEC"
+          else
+            git fetch -q --no-tags origin "$REFSPEC"
+          fi
+          TIP="refs/remotes/origin/$RNW_BRANCH"
+          rc=0
+          git merge-base --is-ancestor "$GITHUB_SHA" "$TIP" || rc=$?
+          case "$rc" in
+            0) ;;
+            1) skip "$GITHUB_SHA is not on origin/$RNW_BRANCH (history rewritten); skipping promote." ;;
+            *) echo "::error::git merge-base failed (exit $rc)"; exit "$rc" ;;
+          esac
+          if [ "$RNW_SCOPE" != "none" ]; then
+            SPECS=()
+            ALL=false
+            if [ "$RNW_SCOPE" = "legs" ]; then
+              while IFS= read -r -d '' P <&3; do
+                if [ -z "$P" ]; then ALL=true; else SPECS+=(":(top,literal)$P"); fi
+              done 3< <(jq -j '.[] | . + "\u0000"' <<< "$RNW_PATHS")
+            else
+              ALL=true
+            fi
+            if [ "$ALL" = "true" ]; then
+              NEWER=$(git log --format=%H --max-count=1 "$GITHUB_SHA..$TIP")
+            else
+              NEWER=$(git -c core.quotePath=false log --format=%H --max-count=1 "$GITHUB_SHA..$TIP" -- "${SPECS[@]}")
+            fi
+            if [ -n "$NEWER" ]; then
+              skip "A newer commit ($NEWER) on $RNW_BRANCH touches this app's paths; its run re-ships this leg, so skipping promote."
+            fi
+          fi
+          echo "promote=true" >> "$GITHUB_OUTPUT"

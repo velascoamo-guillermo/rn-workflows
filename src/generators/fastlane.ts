@@ -19,6 +19,8 @@ interface AndroidProfileView {
   isAab: boolean;
   androidArtifactPath: string;
   track: AndroidTrack;
+  /** With `ota`: query Play for the highest versionCode and build with +1. */
+  bumpVersionCode: boolean;
 }
 
 interface IosProfileView {
@@ -31,6 +33,12 @@ interface IosProfileView {
   codeSignIdentity: string;
   xcWorkspace: string;
   xcScheme: string;
+  /** TestFlight upload. With `ota`, a `store` target lands here too. */
+  uploadToTestflight: boolean;
+  /** App Store submission. Never with `ota`: the native path stops at TestFlight. */
+  uploadToAppStore: boolean;
+  /** With `ota`: set the build number to the latest TestFlight build + 1. */
+  bumpBuildNumber: boolean;
 }
 
 type MatchType = 'appstore' | 'adhoc' | 'development';
@@ -88,6 +96,7 @@ function toAndroidView(name: string, profile: BuildProfile): AndroidProfileView 
     isAab,
     androidArtifactPath: artifactPath,
     track: resolveAndroidTrack(profile),
+    bumpVersionCode: profile.ota !== undefined && targets.includes('store'),
   };
 }
 
@@ -100,6 +109,8 @@ function toIosView(
   const exportMethod = profile.ios?.exportMethod ?? 'app-store';
   const targets = profile.distribution.split('+').map((s) => s.trim());
   const matchType = matchTypeFor(exportMethod);
+  const hasOta = profile.ota !== undefined;
+  const wantsStore = targets.includes('store');
   return {
     name,
     description: `Build ${name} (ios)`,
@@ -110,6 +121,9 @@ function toIosView(
     codeSignIdentity: CODE_SIGN_IDENTITY[matchType],
     xcWorkspace: scheme,
     xcScheme: scheme,
+    uploadToTestflight: targets.includes('testflight') || (hasOta && wantsStore),
+    uploadToAppStore: wantsStore && !hasOta,
+    bumpBuildNumber: hasOta && (targets.includes('testflight') || wantsStore),
   };
 }
 

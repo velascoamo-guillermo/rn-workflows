@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.3.0 - Unreleased
+## 0.3.0-beta.1 - Unreleased
 
 ### BREAKING (configs with `ota`)
 
@@ -19,6 +19,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   resolves the same value for both (use the `fingerprint` policy).
 - The Play track defaults to `internal` when `ota` is set (set
   `android.track` to override).
+- With `ota`, the iOS lane stops at TestFlight: a `store` target uploads to
+  TestFlight and never calls `upload_to_app_store` (submit from App Store
+  Connect).
+- With `ota`, native lanes set their own build numbers: iOS uses the latest
+  TestFlight build + 1 (`increment_build_number`), Android the highest Play
+  versionCode across tracks + 1 (`android.injected.version.code`). Manual
+  `ios.buildNumber` / `android.versionCode` values are overridden.
+- `generate --matrix` workflows with `ota` are now push-triggered (with
+  change detection): OTA matrix apps ship on every push to the profile
+  branch, not only on `v*` tags.
+- Per-app `generate` no longer writes a per-app workflow when the git root
+  already has `.github/workflows/rn-release-matrix.yml`; it writes Fastlane
+  files (and SETUP.md) only.
 
 ### Added
 
@@ -26,10 +39,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ci.runners` and `ci.env` (with reserved-key validation).
 - Self-hosted runner toolchain setup.
 - Staging upload, e2e update-id guard, Maestro run and auto-promote to the
-  production channel.
-- `generate --matrix`: push trigger with change detection, plan-time
-  fingerprint routing, ota/native matrices; a native re-check that finds
-  another run already released the fingerprint ships the commit as an OTA.
+  production channel. Promote runs only when the run is on the profile
+  branch and `origin/<branch>` still points at `$GITHUB_SHA`; otherwise it
+  is skipped with a notice (re-runs of old commits, `v*` tags and dispatches
+  from other branches never promote).
+- `generate --matrix`: plan-time fingerprint routing, ota/native matrices; a
+  native re-check that finds another run already released the fingerprint
+  ships the commit as an OTA.
 - OTA/e2e readiness checks and an "OTA updates" section in `SETUP.md`.
 - Fresh-app acceptance tests for ota+e2e (single app and monorepo).
 
@@ -46,6 +62,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Matrix e2e cannot mix Expo and bare apps.
 - The Maestro installer is not checksummed.
 - The Android emulator is x86_64 only.
+- Without `e2e`, the OTA upload goes straight to the production channel. It
+  is skipped for tag runs, runs from a non-profile branch and commits that
+  are no longer on the profile branch (ancestry check), but there is no
+  newer-commit check, so ordering between two branch pushes relies on the
+  per-platform concurrency group only.
+- The promote guard (with `e2e`) skips promote when a newer commit on the
+  profile branch touches this app's trigger paths (matrix: the same paths
+  change detection selects the app by; single-app workflow: any newer
+  commit), because that run re-ships the leg. Edge: in the single-app
+  workflow, if the newer push routes native (runtime bump), the older
+  runtime's OTA is dropped.
+- Tag runs (`v*`) no longer ship OTA updates: the upload and promote steps only
+  run for pushes to the profile branch.
 
 ## 0.2.0 - 2026-08-04
 

@@ -686,8 +686,10 @@ describe('matrix e2e legs (#54)', () => {
     });
 
     test(`ota ${p} leg without e2e uploads straight to the channel`, () => {
-      const ran = running(ota, { matrix: leg(p, false) });
+      const ran = running(ota, { matrix: leg(p, false), steps: { 'fresh-direct': { promote: 'true' } } });
       expect(ran).toContain('upload');
+      expect(ran.indexOf('fresh-direct')).toBeLessThan(ran.indexOf('upload'));
+      expect(running(ota, { matrix: leg(p, false), steps: { 'fresh-direct': { promote: 'false' } } })).not.toContain('upload');
       for (const id of ['upload-staging', 'promote', `${p}-maestro`, `${p}-e2e-build`]) expect(ran).not.toContain(id);
     });
 
@@ -720,8 +722,10 @@ describe('matrix e2e legs (#54)', () => {
     });
 
     test(`native ${p}: recheck hit without e2e uploads straight to the channel`, () => {
-      const ran = running(native, { matrix: leg(p, false), steps: { recheck: { exists: 'true' } } });
+      const ran = running(native, { matrix: leg(p, false), steps: { recheck: { exists: 'true' }, 'ota-fresh-direct': { promote: 'true' } } });
       expect(ran).toContain('ota-upload');
+      expect(ran.indexOf('ota-fresh-direct')).toBeLessThan(ran.indexOf('ota-upload'));
+      expect(running(native, { matrix: leg(p, false), steps: { recheck: { exists: 'true' }, 'ota-fresh-direct': { promote: 'false' } } })).not.toContain('ota-upload');
       expect(ran.indexOf('ota-upload')).toBeGreaterThan(ran.indexOf('ota-update-id'));
       for (const id of ['fastlane', 'tag', 'ota-upload-staging', 'ota-promote', `ota-${p}-maestro`]) expect(ran).not.toContain(id);
       expect(step(native, 'ota-upload').env?.['RNW_CHANNEL']).toBe('${{ matrix.otaChannel }}');

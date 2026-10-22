@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -55,8 +55,21 @@ describe('I2: build numbers when ota is set', () => {
     expect(inc).toBeLessThan(ios.indexOf('build_app('));
     expect(ios).toContain('xcodeproj: "ios/OtaAll.xcodeproj"');
     expect(ios).toContain(
-      'latest_testflight_build_number(app_identifier: "com.example.otaall", api_key: lane_context[SharedValues::APP_STORE_CONNECT_API_KEY]) + 1',
+      'latest_testflight_build_number(app_identifier: "com.example.otaall", api_key: lane_context[SharedValues::APP_STORE_CONNECT_API_KEY]).to_s.split(".").last.to_i + 1',
     );
+  });
+
+  it('iOS build number coercion survives Integer, String and dotted values', () => {
+    const ios = laneBody(fastfileFor('ota-e2e-all.yml'), 'ios', 'production');
+    const m = /build_number: (.*)\n/.exec(ios);
+    // evaluate the template's coercion tail against what the action may return
+    const tail = /\)(\.to_s\.split\(".*)$/.exec(m![1]!)![1]!;
+    const ruby = (v: string): string =>
+      spawnSync('ruby', ['-e', `puts(${v}${tail})`], { encoding: 'utf8' }).stdout.trim();
+    expect(ruby('42')).toBe('43');
+    expect(ruby('"42"')).toBe('43');
+    expect(ruby('"1.0.3"')).toBe('4');
+    expect(ruby('nil')).toBe('1');
   });
 
   it('Android lane computes the next versionCode from Play and injects it into gradle', () => {

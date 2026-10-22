@@ -221,7 +221,8 @@ describe('platform coverage', () => {
     expect(noE2eContent).not.toContain('upload-staging');
     expect(noE2eContent).not.toContain('maestro');
     expect(noE2eContent).not.toContain('actions/cache');
-    expect(noE2eContent).not.toContain('promote');
+    expect(noE2eContent).not.toContain('id: promote');
+    expect(noE2eContent).not.toContain('Promote OTA update');
   });
 
   test('ios-only e2e profile has no android e2e', () => {
@@ -263,7 +264,7 @@ describe('platform coverage', () => {
 
 describe('native-<p>: recheck hit ships this commit as an OTA instead of skipping (#54 M-1)', () => {
   const running = (job: WorkflowJob, exists: string): string[] =>
-    job.steps.filter((s) => stepRuns(s, { steps: { recheck: { exists }, 'ota-fresh': { promote: 'true' } } })).map((s) => s.id ?? s.name ?? '');
+    job.steps.filter((s) => stepRuns(s, { steps: { recheck: { exists }, 'ota-fresh': { promote: 'true' }, 'ota-fresh-direct': { promote: 'true' } } })).map((s) => s.id ?? s.name ?? '');
   const ordered = (ran: string[], ids: string[]): void => {
     const at = ids.map((id) => ran.indexOf(id));
     expect({ ids, at: at.every((i) => i >= 0) }).toEqual({ ids, at: true });
@@ -311,7 +312,7 @@ describe('native-<p>: recheck hit ships this commit as an OTA instead of skippin
     test(`${p} no e2e: hit → package → upload to the channel; no fastlane/tag`, () => {
       const job = noE2e.jobs[`native-${p}`]!;
       const ran = running(job, 'true');
-      ordered(ran, ['recheck', 'ota-update-id', 'ota-upload']);
+      ordered(ran, ['recheck', 'ota-update-id', 'ota-fresh-direct', 'ota-upload']);
       expect(ran).not.toContain('tag');
       expect(job.steps.filter((s) => stepRuns(s, { steps: { recheck: { exists: 'true' } } })).some(isFastlane)).toBe(false);
       expect(step(job, 'ota-upload').env?.RNW_CHANNEL).toBe('production');

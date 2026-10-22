@@ -149,8 +149,65 @@ jobs:
           UPDATE_ID=$(node -e 'const h = require("crypto").createHash("sha256").update(require("fs").readFileSync("dist/metadata.json")).digest("hex"); console.log([h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20, 32)].join("-"))')
           echo "update_id=$UPDATE_ID" >> "$GITHUB_OUTPUT"
 
+      - name: Check this commit is safe to promote
+        id: fresh-direct
+        env:
+          RNW_BRANCH: main
+          RNW_SCOPE: none
+        run: |
+          set -euo pipefail
+          skip() {
+            echo "::notice::$1 The staging upload and e2e stand."
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          if [ "\${GITHUB_REF:-}" != "refs/heads/$RNW_BRANCH" ]; then
+            skip "Not a run on branch $RNW_BRANCH (\${GITHUB_REF:-?}); skipping promote."
+          fi
+          rc=0
+          git ls-remote --exit-code origin "refs/heads/$RNW_BRANCH" > /dev/null || rc=$?
+          case "$rc" in
+            0) ;;
+            2) skip "origin has no branch $RNW_BRANCH; skipping promote." ;;
+            *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
+          esac
+          REFSPEC="+refs/heads/$RNW_BRANCH:refs/remotes/origin/$RNW_BRANCH"
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch -q --no-tags --unshallow origin "$REFSPEC"
+          else
+            git fetch -q --no-tags origin "$REFSPEC"
+          fi
+          TIP="refs/remotes/origin/$RNW_BRANCH"
+          rc=0
+          git merge-base --is-ancestor "$GITHUB_SHA" "$TIP" || rc=$?
+          case "$rc" in
+            0) ;;
+            1) skip "$GITHUB_SHA is not on origin/$RNW_BRANCH (history rewritten); skipping promote." ;;
+            *) echo "::error::git merge-base failed (exit $rc)"; exit "$rc" ;;
+          esac
+          if [ "$RNW_SCOPE" != "none" ]; then
+            SPECS=()
+            ALL=false
+            if [ "$RNW_SCOPE" = "legs" ]; then
+              while IFS= read -r -d '' P <&3; do
+                if [ -z "$P" ]; then ALL=true; else SPECS+=(":(top,literal)$P"); fi
+              done 3< <(jq -j '.[] | . + "\\u0000"' <<< "$RNW_PATHS")
+            else
+              ALL=true
+            fi
+            if [ "$ALL" = "true" ]; then
+              NEWER=$(git log --format=%H --max-count=1 "$GITHUB_SHA..$TIP")
+            else
+              NEWER=$(git -c core.quotePath=false log --format=%H --max-count=1 "$GITHUB_SHA..$TIP" -- "\${SPECS[@]}")
+            fi
+            if [ -n "$NEWER" ]; then
+              skip "A newer commit ($NEWER) on $RNW_BRANCH touches this app's paths; its run re-ships this leg, so skipping promote."
+            fi
+          fi
+          echo "promote=true" >> "$GITHUB_OUTPUT"
       - name: Upload OTA update
         id: upload
+        if: steps.fresh-direct.outputs.promote == 'true'
         env:
           RNW_OTA_SERVER: 'https://ota.myapp.com'
           RNW_CHANNEL: production
@@ -211,8 +268,65 @@ jobs:
           UPDATE_ID=$(node -e 'const h = require("crypto").createHash("sha256").update(require("fs").readFileSync("dist/metadata.json")).digest("hex"); console.log([h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20, 32)].join("-"))')
           echo "update_id=$UPDATE_ID" >> "$GITHUB_OUTPUT"
 
+      - name: Check this commit is safe to promote
+        id: fresh-direct
+        env:
+          RNW_BRANCH: main
+          RNW_SCOPE: none
+        run: |
+          set -euo pipefail
+          skip() {
+            echo "::notice::$1 The staging upload and e2e stand."
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          if [ "\${GITHUB_REF:-}" != "refs/heads/$RNW_BRANCH" ]; then
+            skip "Not a run on branch $RNW_BRANCH (\${GITHUB_REF:-?}); skipping promote."
+          fi
+          rc=0
+          git ls-remote --exit-code origin "refs/heads/$RNW_BRANCH" > /dev/null || rc=$?
+          case "$rc" in
+            0) ;;
+            2) skip "origin has no branch $RNW_BRANCH; skipping promote." ;;
+            *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
+          esac
+          REFSPEC="+refs/heads/$RNW_BRANCH:refs/remotes/origin/$RNW_BRANCH"
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch -q --no-tags --unshallow origin "$REFSPEC"
+          else
+            git fetch -q --no-tags origin "$REFSPEC"
+          fi
+          TIP="refs/remotes/origin/$RNW_BRANCH"
+          rc=0
+          git merge-base --is-ancestor "$GITHUB_SHA" "$TIP" || rc=$?
+          case "$rc" in
+            0) ;;
+            1) skip "$GITHUB_SHA is not on origin/$RNW_BRANCH (history rewritten); skipping promote." ;;
+            *) echo "::error::git merge-base failed (exit $rc)"; exit "$rc" ;;
+          esac
+          if [ "$RNW_SCOPE" != "none" ]; then
+            SPECS=()
+            ALL=false
+            if [ "$RNW_SCOPE" = "legs" ]; then
+              while IFS= read -r -d '' P <&3; do
+                if [ -z "$P" ]; then ALL=true; else SPECS+=(":(top,literal)$P"); fi
+              done 3< <(jq -j '.[] | . + "\\u0000"' <<< "$RNW_PATHS")
+            else
+              ALL=true
+            fi
+            if [ "$ALL" = "true" ]; then
+              NEWER=$(git log --format=%H --max-count=1 "$GITHUB_SHA..$TIP")
+            else
+              NEWER=$(git -c core.quotePath=false log --format=%H --max-count=1 "$GITHUB_SHA..$TIP" -- "\${SPECS[@]}")
+            fi
+            if [ -n "$NEWER" ]; then
+              skip "A newer commit ($NEWER) on $RNW_BRANCH touches this app's paths; its run re-ships this leg, so skipping promote."
+            fi
+          fi
+          echo "promote=true" >> "$GITHUB_OUTPUT"
       - name: Upload OTA update
         id: upload
+        if: steps.fresh-direct.outputs.promote == 'true'
         env:
           RNW_OTA_SERVER: 'https://ota.myapp.com'
           RNW_CHANNEL: production
@@ -332,9 +446,66 @@ jobs:
           UPDATE_ID=$(node -e 'const h = require("crypto").createHash("sha256").update(require("fs").readFileSync("dist/metadata.json")).digest("hex"); console.log([h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20, 32)].join("-"))')
           echo "update_id=$UPDATE_ID" >> "$GITHUB_OUTPUT"
 
+      - name: Check this commit is safe to promote
+        id: ota-fresh-direct
+        if: steps.recheck.outputs.exists == 'true'
+        env:
+          RNW_BRANCH: main
+          RNW_SCOPE: none
+        run: |
+          set -euo pipefail
+          skip() {
+            echo "::notice::$1 The staging upload and e2e stand."
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          if [ "\${GITHUB_REF:-}" != "refs/heads/$RNW_BRANCH" ]; then
+            skip "Not a run on branch $RNW_BRANCH (\${GITHUB_REF:-?}); skipping promote."
+          fi
+          rc=0
+          git ls-remote --exit-code origin "refs/heads/$RNW_BRANCH" > /dev/null || rc=$?
+          case "$rc" in
+            0) ;;
+            2) skip "origin has no branch $RNW_BRANCH; skipping promote." ;;
+            *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
+          esac
+          REFSPEC="+refs/heads/$RNW_BRANCH:refs/remotes/origin/$RNW_BRANCH"
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch -q --no-tags --unshallow origin "$REFSPEC"
+          else
+            git fetch -q --no-tags origin "$REFSPEC"
+          fi
+          TIP="refs/remotes/origin/$RNW_BRANCH"
+          rc=0
+          git merge-base --is-ancestor "$GITHUB_SHA" "$TIP" || rc=$?
+          case "$rc" in
+            0) ;;
+            1) skip "$GITHUB_SHA is not on origin/$RNW_BRANCH (history rewritten); skipping promote." ;;
+            *) echo "::error::git merge-base failed (exit $rc)"; exit "$rc" ;;
+          esac
+          if [ "$RNW_SCOPE" != "none" ]; then
+            SPECS=()
+            ALL=false
+            if [ "$RNW_SCOPE" = "legs" ]; then
+              while IFS= read -r -d '' P <&3; do
+                if [ -z "$P" ]; then ALL=true; else SPECS+=(":(top,literal)$P"); fi
+              done 3< <(jq -j '.[] | . + "\\u0000"' <<< "$RNW_PATHS")
+            else
+              ALL=true
+            fi
+            if [ "$ALL" = "true" ]; then
+              NEWER=$(git log --format=%H --max-count=1 "$GITHUB_SHA..$TIP")
+            else
+              NEWER=$(git -c core.quotePath=false log --format=%H --max-count=1 "$GITHUB_SHA..$TIP" -- "\${SPECS[@]}")
+            fi
+            if [ -n "$NEWER" ]; then
+              skip "A newer commit ($NEWER) on $RNW_BRANCH touches this app's paths; its run re-ships this leg, so skipping promote."
+            fi
+          fi
+          echo "promote=true" >> "$GITHUB_OUTPUT"
       - name: Upload OTA update
         id: ota-upload
-        if: steps.recheck.outputs.exists == 'true'
+        if: steps.recheck.outputs.exists == 'true' && steps.ota-fresh-direct.outputs.promote == 'true'
         env:
           RNW_OTA_SERVER: 'https://ota.myapp.com'
           RNW_CHANNEL: production
@@ -459,9 +630,66 @@ jobs:
           UPDATE_ID=$(node -e 'const h = require("crypto").createHash("sha256").update(require("fs").readFileSync("dist/metadata.json")).digest("hex"); console.log([h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20, 32)].join("-"))')
           echo "update_id=$UPDATE_ID" >> "$GITHUB_OUTPUT"
 
+      - name: Check this commit is safe to promote
+        id: ota-fresh-direct
+        if: steps.recheck.outputs.exists == 'true'
+        env:
+          RNW_BRANCH: main
+          RNW_SCOPE: none
+        run: |
+          set -euo pipefail
+          skip() {
+            echo "::notice::$1 The staging upload and e2e stand."
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          if [ "\${GITHUB_REF:-}" != "refs/heads/$RNW_BRANCH" ]; then
+            skip "Not a run on branch $RNW_BRANCH (\${GITHUB_REF:-?}); skipping promote."
+          fi
+          rc=0
+          git ls-remote --exit-code origin "refs/heads/$RNW_BRANCH" > /dev/null || rc=$?
+          case "$rc" in
+            0) ;;
+            2) skip "origin has no branch $RNW_BRANCH; skipping promote." ;;
+            *) echo "::error::git ls-remote origin failed (exit $rc)"; exit "$rc" ;;
+          esac
+          REFSPEC="+refs/heads/$RNW_BRANCH:refs/remotes/origin/$RNW_BRANCH"
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch -q --no-tags --unshallow origin "$REFSPEC"
+          else
+            git fetch -q --no-tags origin "$REFSPEC"
+          fi
+          TIP="refs/remotes/origin/$RNW_BRANCH"
+          rc=0
+          git merge-base --is-ancestor "$GITHUB_SHA" "$TIP" || rc=$?
+          case "$rc" in
+            0) ;;
+            1) skip "$GITHUB_SHA is not on origin/$RNW_BRANCH (history rewritten); skipping promote." ;;
+            *) echo "::error::git merge-base failed (exit $rc)"; exit "$rc" ;;
+          esac
+          if [ "$RNW_SCOPE" != "none" ]; then
+            SPECS=()
+            ALL=false
+            if [ "$RNW_SCOPE" = "legs" ]; then
+              while IFS= read -r -d '' P <&3; do
+                if [ -z "$P" ]; then ALL=true; else SPECS+=(":(top,literal)$P"); fi
+              done 3< <(jq -j '.[] | . + "\\u0000"' <<< "$RNW_PATHS")
+            else
+              ALL=true
+            fi
+            if [ "$ALL" = "true" ]; then
+              NEWER=$(git log --format=%H --max-count=1 "$GITHUB_SHA..$TIP")
+            else
+              NEWER=$(git -c core.quotePath=false log --format=%H --max-count=1 "$GITHUB_SHA..$TIP" -- "\${SPECS[@]}")
+            fi
+            if [ -n "$NEWER" ]; then
+              skip "A newer commit ($NEWER) on $RNW_BRANCH touches this app's paths; its run re-ships this leg, so skipping promote."
+            fi
+          fi
+          echo "promote=true" >> "$GITHUB_OUTPUT"
       - name: Upload OTA update
         id: ota-upload
-        if: steps.recheck.outputs.exists == 'true'
+        if: steps.recheck.outputs.exists == 'true' && steps.ota-fresh-direct.outputs.promote == 'true'
         env:
           RNW_OTA_SERVER: 'https://ota.myapp.com'
           RNW_CHANNEL: production

@@ -26,7 +26,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   TestFlight build + 1 (`increment_build_number`), Android the highest Play
   versionCode across tracks + 1 (`android.injected.version.code`). Manual
   `ios.buildNumber` / `android.versionCode` values are overridden.
-
 - `generate --matrix` workflows with `ota` are now push-triggered (with
   change detection): OTA matrix apps ship on every push to the profile
   branch, not only on `v*` tags.
@@ -63,9 +62,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Matrix e2e cannot mix Expo and bare apps.
 - The Maestro installer is not checksummed.
 - The Android emulator is x86_64 only.
-- Without `e2e`, the OTA upload goes straight to the production channel and
-  has no branch-tip check; ordering relies on the per-platform concurrency
-  group only.
+- Without `e2e`, the OTA upload goes straight to the production channel. It
+  is skipped for tag runs, runs from a non-profile branch and commits that
+  are no longer on the profile branch (ancestry check), but there is no
+  newer-commit check, so ordering between two branch pushes relies on the
+  per-platform concurrency group only.
+- The promote guard (with `e2e`) skips promote when a newer commit on the
+  profile branch touches this app's trigger paths (matrix: the same paths
+  change detection selects the app by; single-app workflow: any newer
+  commit), because that run re-ships the leg. Edge: in the single-app
+  workflow, if the newer push routes native (runtime bump), the older
+  runtime's OTA is dropped.
+- Tag runs (`v*`) no longer ship OTA updates: the upload and promote steps only
+  run for pushes to the profile branch.
 
 ## 0.2.0 - 2026-08-04
 
